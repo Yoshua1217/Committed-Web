@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Image from "next/image";
+import logoPic from "../../public/logo.png";
 import { useAuth } from "@/lib/auth-context";
 
 interface NavItem {
@@ -150,7 +151,7 @@ export default function Navigation() {
           style={{ padding: "32px 24px" }}
         >
           <Image 
-            src="/logo.png" 
+            src={logoPic} 
             alt="Committed Logo" 
             width={34}
             height={34}
