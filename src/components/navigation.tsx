@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Image from "next/image";
 import { useAuth } from "@/lib/auth-context";
 
 interface NavItem {
@@ -148,12 +149,12 @@ export default function Navigation() {
           className="flex items-center gap-3"
           style={{ padding: "32px 24px" }}
         >
-          <img 
+          <Image 
             src="/logo.png" 
             alt="Committed Logo" 
+            width={34}
+            height={34}
             style={{
-              width: 34,
-              height: 34,
               borderRadius: 10,
               objectFit: "cover",
               flexShrink: 0,
