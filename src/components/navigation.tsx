@@ -148,32 +148,17 @@ export default function Navigation() {
           className="flex items-center gap-3"
           style={{ padding: "32px 24px" }}
         >
-          {/* Checkmark icon in rounded square */}
-          <div
+          <img 
+            src="/logo.png" 
+            alt="Committed Logo" 
             style={{
               width: 34,
               height: 34,
               borderRadius: 10,
-              backgroundColor: "var(--primary)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
+              objectFit: "cover",
               flexShrink: 0,
             }}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--background)"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
+          />
           <h1
             style={{
               fontSize: 20,
