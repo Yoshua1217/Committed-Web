@@ -1,17 +1,21 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import AuthScreen from "@/components/auth-screen";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import Navigation from "@/components/navigation";
 
-export default function Home() {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && user) {
-      router.replace("/dashboard");
+    if (!loading && !user) {
+      router.replace("/");
     }
   }, [user, loading, router]);
 
@@ -23,9 +27,14 @@ export default function Home() {
     );
   }
 
-  if (!user) {
-    return <AuthScreen />;
-  }
+  if (!user) return null;
 
-  return null;
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }}>
+      <Navigation />
+      <main className="sidebar-offset mobile-nav-offset min-h-screen">
+        {children}
+      </main>
+    </div>
+  );
 }
