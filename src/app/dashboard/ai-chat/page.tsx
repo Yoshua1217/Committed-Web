@@ -68,7 +68,7 @@ export default function AiChatPage() {
   const [systemPrompt, setSystemPrompt] = useState("");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Subscribe to data for system prompt
   useEffect(() => {
@@ -181,6 +181,7 @@ export default function AiChatPage() {
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
     setError(null);
     setIsLoading(true);
 
@@ -486,7 +487,7 @@ export default function AiChatPage() {
 
       {/* Input bar */}
       <div
-        className="shrink-0 flex items-center"
+        className="shrink-0 flex items-end"
         style={{
           padding: "16px 20px",
           gap: "12px",
@@ -494,14 +495,19 @@ export default function AiChatPage() {
           borderTop: "1px solid var(--border)",
         }}
       >
-        <input
+        <textarea
           ref={inputRef}
-          type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            // Auto-resize
+            e.target.style.height = "auto";
+            e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
+          }}
           onKeyDown={handleKeyDown}
           placeholder={chatMode === "agent" ? "Ask anything — the right model will be picked for you..." : "Ask me anything..."}
           disabled={isLoading}
+          rows={1}
           className="flex-1"
           style={{
             padding: "14px 16px",
@@ -511,6 +517,11 @@ export default function AiChatPage() {
             color: "var(--primary)",
             border: "1px solid var(--border)",
             outline: "none",
+            resize: "none",
+            overflow: "auto",
+            lineHeight: "1.4",
+            maxHeight: 160,
+            fontFamily: "inherit",
           }}
         />
         <button

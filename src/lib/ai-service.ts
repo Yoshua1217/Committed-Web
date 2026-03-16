@@ -189,13 +189,11 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
 
 export type AiModel =
   | "google/gemini-2.5-flash-lite"
-  | "openai/gpt-4o"
   | "deepseek/deepseek-v3.2"
   | "meta-llama/llama-4-maverick";
 
 export const AI_MODELS: { id: AiModel; label: string }[] = [
   { id: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
-  { id: "openai/gpt-4o", label: "GPT-4o" },
   { id: "deepseek/deepseek-v3.2", label: "DeepSeek V3.2" },
   { id: "meta-llama/llama-4-maverick", label: "Llama 4 Maverick" },
 ];
