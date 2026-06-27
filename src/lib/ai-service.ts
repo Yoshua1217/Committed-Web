@@ -1,7 +1,7 @@
 import { functions } from "@/lib/firebase";
 import { httpsCallable } from "firebase/functions";
 import { Habit, HabitCompletion, Bucket, Goal, StreakInfo, UserSettings, ChatMessage } from "@/lib/types";
-import { calculateStreak, isScheduledForDay } from "@/lib/streak-calculator";
+import { calculateStreak, isScheduledForDate } from "@/lib/streak-calculator";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,8 +64,8 @@ function getTypeInfo(habit: Habit): string {
   }
 }
 
-function getTodayStatus(habit: Habit, completions: HabitCompletion[], dayOfWeek: number): string {
-  if (!isScheduledForDay(habit, dayOfWeek)) {
+function getTodayStatus(habit: Habit, completions: HabitCompletion[]): string {
+  if (!isScheduledForDate(habit, formatTodayDate())) {
     return "Not scheduled today";
   }
 
@@ -95,7 +95,6 @@ function getTodayStatus(habit: Habit, completions: HabitCompletion[], dayOfWeek:
 
 export function buildSystemPrompt(params: SystemPromptParams): string {
   const { buckets, goals, habits, completions, streaks, settings } = params;
-  const dayOfWeek = getTodayDayOfWeek();
   const lines: string[] = [];
 
   // Header
@@ -154,7 +153,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     const bucketName = bucket?.name ?? "Unknown";
     const typeInfo = getTypeInfo(habit);
     const schedule = getScheduleDays(habit);
-    const todayStatus = getTodayStatus(habit, completions, dayOfWeek);
+    const todayStatus = getTodayStatus(habit, completions);
     const streak = streaks[habit.id] ?? { currentStreak: 0, currentAntiStreak: 0 };
 
     const goalName = goal?.name ?? "No goal";
@@ -166,7 +165,9 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
   }
 
   // Today's summary
-  const scheduledHabits = habits.filter((h) => isScheduledForDay(h, dayOfWeek));
+  const scheduledHabits = habits.filter((h) =>
+    isScheduledForDate(h, formatTodayDate()) || completions.find((c) => c.habitId === h.id)?.completed
+  );
   const completedHabits = scheduledHabits.filter((h) => {
     const completion = completions.find((c) => c.habitId === h.id);
     return completion?.completed === true;

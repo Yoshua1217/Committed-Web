@@ -14,7 +14,7 @@ import {
 } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { isScheduledForDay } from "@/lib/streak-calculator";
+import { isHabitPausedOnDate, isScheduledForDate } from "@/lib/streak-calculator";
 import HabitEditModal from "@/components/habit-edit-modal";
 import MaterialIcon from "@/components/material-icon";
 
@@ -57,11 +57,6 @@ function dateToString(d: Date): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
-
-/** 1=Mon...7=Sun from a Date */
-function jsDayToOurDay(jsDay: number): number {
-  return jsDay === 0 ? 7 : jsDay;
 }
 
 /** Generate past N days (excluding today) */
@@ -122,10 +117,10 @@ export default function ManageHabitsPage() {
       });
 
       getCompletionsForDate(user.uid, dateStr).then((completions) => {
-        const d = new Date(dateStr + "T12:00:00");
-        const dow = jsDayToOurDay(d.getDay());
-        const scheduled = habits.filter((h) => isScheduledForDay(h, dow));
         const completionMap = new Map(completions.map((c) => [c.habitId, c]));
+        const scheduled = habits.filter((h) =>
+          isScheduledForDate(h, dateStr) || completionMap.get(h.id)?.completed
+        );
         const completedCount = scheduled.filter((h) => completionMap.get(h.id)?.completed).length;
 
         setDayDataMap((prev) => ({
@@ -160,14 +155,34 @@ export default function ManageHabitsPage() {
     try { await deleteHabit(habitId); } catch (err) { console.error(err); }
   };
 
+  const handleTogglePause = async (habit: Habit) => {
+    const today = dateToString(new Date());
+    const periods = [...(habit.pausePeriods ?? [])];
+    const openIndex = periods.findIndex((period) => period.endedOn === null);
+
+    if (openIndex >= 0) {
+      if (periods[openIndex].startedOn === today) {
+        periods.splice(openIndex, 1);
+      } else {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        periods[openIndex] = { ...periods[openIndex], endedOn: dateToString(yesterday) };
+      }
+    } else {
+      periods.push({ startedOn: today, endedOn: null });
+    }
+
+    await saveHabit({ ...habit, pausePeriods: periods });
+  };
+
   const openDayEditor = (dateStr: string) => {
     const dayData = dayDataMap[dateStr];
     if (!dayData || dayData.loading) return;
 
-    const d = new Date(dateStr + "T12:00:00");
-    const dow = jsDayToOurDay(d.getDay());
-    const scheduled = habits.filter((h) => isScheduledForDay(h, dow));
     const completionMap = new Map(dayData.completions.map((c) => [c.habitId, c]));
+    const scheduled = habits.filter((h) =>
+      isScheduledForDate(h, dateStr) || completionMap.get(h.id)?.completed
+    );
 
     const initial: Record<string, boolean> = {};
     scheduled.forEach((h) => {
@@ -214,10 +229,10 @@ export default function ManageHabitsPage() {
       return;
     }
     const freshCompletions = await getCompletionsForDate(user.uid, editingDay);
-    const d = new Date(editingDay + "T12:00:00");
-    const dow = jsDayToOurDay(d.getDay());
-    const scheduled = habits.filter((h) => isScheduledForDay(h, dow));
     const freshMap = new Map(freshCompletions.map((c) => [c.habitId, c]));
+    const scheduled = habits.filter((h) =>
+      isScheduledForDate(h, editingDay) || freshMap.get(h.id)?.completed
+    );
     const completedCount = scheduled.filter((h) => freshMap.get(h.id)?.completed).length;
 
     setDayDataMap((prev) => ({
@@ -238,9 +253,10 @@ export default function ManageHabitsPage() {
   // Get scheduled habits for the editing day
   const editingDayScheduled = editingDay
     ? (() => {
-        const d = new Date(editingDay + "T12:00:00");
-        const dow = jsDayToOurDay(d.getDay());
-        return habits.filter((h) => isScheduledForDay(h, dow));
+        const completionMap = new Map(dayDataMap[editingDay]?.completions.map((c) => [c.habitId, c]) ?? []);
+        return habits.filter((h) =>
+          isScheduledForDate(h, editingDay) || completionMap.get(h.id)?.completed
+        );
       })()
     : [];
 
@@ -330,6 +346,7 @@ export default function ManageHabitsPage() {
                 const goal = goalMap.get(habit.goalId);
                 const bucket = goal ? bucketMap.get(goal.bucketId) : bucketMap.get(habit.bucketId);
                 const isDeleting = deleteConfirm === habit.id;
+                const isPaused = isHabitPausedOnDate(habit, dateToString(new Date()));
 
                 return (
                   <div
@@ -402,6 +419,36 @@ export default function ManageHabitsPage() {
                         ))}
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      title={isPaused ? "Unpause habit" : "Pause habit"}
+                      aria-label={isPaused ? "Unpause habit" : "Pause habit"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleTogglePause(habit);
+                      }}
+                      className="shrink-0 flex items-center justify-center"
+                      style={{
+                        color: isPaused ? "#4CAF50" : "var(--secondary)",
+                        backgroundColor: isPaused ? "#4CAF5015" : "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        borderRadius: 12,
+                        padding: 8,
+                      }}
+                    >
+                      {isPaused ? (
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      ) : (
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="6" y="4" width="4" height="16" rx="1" />
+                          <rect x="14" y="4" width="4" height="16" rx="1" />
+                        </svg>
+                      )}
+                    </button>
 
                     <button
                       onClick={(e) => {

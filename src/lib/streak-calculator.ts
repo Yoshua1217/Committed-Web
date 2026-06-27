@@ -18,6 +18,18 @@ export function isScheduledForDay(habit: Habit, dayOfWeek: number): boolean {
   }
 }
 
+export function isHabitPausedOnDate(habit: Habit, date: string): boolean {
+  return (habit.pausePeriods ?? []).some(
+    (period) => date >= period.startedOn && (period.endedOn === null || date <= period.endedOn)
+  );
+}
+
+export function isScheduledForDate(habit: Habit, date: string): boolean {
+  const parsed = parseDate(date);
+  if (!parsed || isHabitPausedOnDate(habit, date)) return false;
+  return isScheduledForDay(habit, jsDayToIsoDayOfWeek(parsed.getDay()));
+}
+
 /**
  * Convert a JavaScript Date.getDay() value (0=Sunday, 1=Monday, ..., 6=Saturday)
  * to 1=Monday, 2=Tuesday, ..., 7=Sunday.
@@ -111,14 +123,11 @@ export function calculateStreak(
 
   // Walk backward day by day
   while (date > limit && date >= earliestDate) {
-    const dayOfWeek = jsDayToIsoDayOfWeek(date.getDay());
-
-    if (!isScheduledForDay(habit, dayOfWeek)) {
+    const dateStr = formatDate(date);
+    if (!isScheduledForDate(habit, dateStr)) {
       date = subtractDays(date, 1);
       continue;
     }
-
-    const dateStr = formatDate(date);
     const completion = completionMap.get(dateStr);
     const wasCompleted = completion?.completed === true;
 

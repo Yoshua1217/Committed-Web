@@ -40,6 +40,7 @@ export interface Habit {
   sortOrder: number;
   createdAt: number;
   userId: string;
+  pausePeriods: { startedOn: string; endedOn: string | null }[];
 }
 
 export interface HabitCompletion {

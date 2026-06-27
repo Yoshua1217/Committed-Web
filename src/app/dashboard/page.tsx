@@ -14,17 +14,13 @@ import {
 } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { isScheduledForDay } from "@/lib/streak-calculator";
+import { isScheduledForDate } from "@/lib/streak-calculator";
 import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
 
 function argbToHex(argb: number): string {
   const rgb = argb & 0x00ffffff;
   return "#" + rgb.toString(16).padStart(6, "0").toUpperCase();
-}
-
-function jsDayToOurDay(jsDay: number): number {
-  return jsDay === 0 ? 7 : jsDay;
 }
 
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -43,7 +39,6 @@ export default function DashboardHome() {
   const displayName = user?.displayName || user?.email?.split("@")[0] || "there";
 
   const today = todayString();
-  const todayDow = jsDayToOurDay(new Date().getDay());
   const now = new Date();
   const dateStr = `${dayNames[now.getDay()]}, ${monthNames[now.getMonth()]} ${now.getDate()}`;
 
@@ -67,7 +62,9 @@ export default function DashboardHome() {
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
 
-  const scheduledHabits = habits.filter((h) => isScheduledForDay(h, todayDow));
+  const scheduledHabits = habits.filter((h) =>
+    isScheduledForDate(h, today) || completionMap.get(h.id)?.completed
+  );
   const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed);
   const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed);
   // Calculate progress: counter/timer habits contribute fractionally

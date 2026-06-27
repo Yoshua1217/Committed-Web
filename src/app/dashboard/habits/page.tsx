@@ -17,16 +17,11 @@ import {
 } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { calculateStreak, isScheduledForDay } from "@/lib/streak-calculator";
+import { calculateStreak, isScheduledForDate } from "@/lib/streak-calculator";
 import HabitCard from "@/components/habit-card";
 import ProgressCard from "@/components/progress-card";
 import CongratsPopup from "@/components/congrats-popup";
 import HabitEditModal from "@/components/habit-edit-modal";
-
-/** Convert JS Date.getDay() (0=Sun) to 1=Mon...7=Sun */
-function jsDayToOurDay(jsDay: number): number {
-  return jsDay === 0 ? 7 : jsDay;
-}
 
 const sectionHeaderStyle: React.CSSProperties = {
   fontSize: 11,
@@ -45,7 +40,6 @@ export default function HabitsPage() {
   const { user } = useAuth();
   const router = useRouter();
   const today = todayString();
-  const todayDow = jsDayToOurDay(new Date().getDay());
 
   const [habits, setHabits] = useState<Habit[]>([]);
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
@@ -116,7 +110,9 @@ export default function HabitsPage() {
   }, [habits, streakVersion]);
 
   // Filter to today's scheduled habits
-  const scheduledHabits = habits.filter((h) => isScheduledForDay(h, todayDow));
+  const scheduledHabits = habits.filter((h) =>
+    isScheduledForDate(h, today) || completionMap.get(h.id)?.completed
+  );
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));

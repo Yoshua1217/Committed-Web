@@ -63,6 +63,9 @@ function habitFromFirestore(data: Record<string, unknown>): Habit {
     sortOrder: Number(data.sortOrder ?? 0),
     createdAt: Number(data.createdAt ?? 0),
     userId: (data.userId as string) ?? "",
+    pausePeriods: Array.isArray(data.pausePeriods)
+      ? (data.pausePeriods as Habit["pausePeriods"])
+      : [],
   };
 }
 
@@ -139,6 +142,7 @@ export async function saveHabit(habit: Habit): Promise<void> {
     sortOrder: habit.sortOrder,
     createdAt: habit.createdAt,
     userId: habit.userId,
+    pausePeriods: habit.pausePeriods ?? [],
   });
 }
 

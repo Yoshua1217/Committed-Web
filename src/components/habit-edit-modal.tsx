@@ -201,6 +201,7 @@ export default function HabitEditModal({
       sortOrder: habit?.sortOrder ?? nextSortOrder,
       createdAt: habit?.createdAt ?? Date.now(),
       userId: habit?.userId ?? userId,
+      pausePeriods: habit?.pausePeriods ?? [],
     };
     onSave(saved);
     onClose();
