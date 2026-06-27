@@ -57,7 +57,7 @@ export default function DashboardHome() {
     if (!user) return;
     const unsubs: (() => void)[] = [];
     unsubs.push(subscribeToHabits(user.uid, (h) => { setHabits(h); setLoading(false); }));
-    unsubs.push(subscribeToCompletionsForDate(today, (c) => setCompletions(c)));
+    unsubs.push(subscribeToCompletionsForDate(user.uid, today, (c) => setCompletions(c)));
     unsubs.push(subscribeToBuckets(user.uid, (b) => setBuckets(b)));
     unsubs.push(subscribeToGoals(user.uid, (g) => setGoals(g)));
     return () => unsubs.forEach((u) => u());

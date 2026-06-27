@@ -1,0 +1,89 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(data) {
+      return isSignedIn() && data.userId == request.auth.uid;
+    }
+
+    function ownsHabit(habitId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/habits/$(habitId)).data.userId == request.auth.uid;
+    }
+
+    // Every document in these collections carries its owner's Firebase Auth UID.
+    match /buckets/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /goals/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /habits/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /tasks/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /labels/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /notes/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /prompts/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /prompt_labels/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /prompt_platforms/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    // Completion queries are scoped by userId. The referenced habit must also
+    // belong to that user so a completion cannot be attached to another account.
+    match /habit_completions/{documentId} {
+      allow create: if isOwner(request.resource.data)
+        && ownsHabit(request.resource.data.habitId);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data)
+        && isOwner(request.resource.data)
+        && ownsHabit(request.resource.data.habitId);
+    }
+
+    // Settings use the Firebase Auth UID as the document ID.
+    match /userSettings/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}

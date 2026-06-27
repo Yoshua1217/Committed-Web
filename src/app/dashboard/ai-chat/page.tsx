@@ -75,7 +75,7 @@ export default function AiChatPage() {
     if (!user) return;
     const unsubs: (() => void)[] = [];
     unsubs.push(subscribeToHabits(user.uid, setHabits));
-    unsubs.push(subscribeToCompletionsForDate(today, setCompletions));
+    unsubs.push(subscribeToCompletionsForDate(user.uid, today, setCompletions));
     unsubs.push(subscribeToBuckets(user.uid, setBuckets));
     unsubs.push(subscribeToGoals(user.uid, setGoals));
     unsubs.push(subscribeToSettings(user.uid, setSettings));
@@ -107,7 +107,7 @@ export default function AiChatPage() {
       const streaks: Record<string, StreakInfo> = {};
       for (const h of habits) {
         try {
-          const hc = await getCompletionsForHabit(h.id);
+          const hc = await getCompletionsForHabit(h.userId, h.id);
           streaks[h.id] = calculateStreak(h, hc);
         } catch {
           streaks[h.id] = { currentStreak: 0, currentAntiStreak: 0 };

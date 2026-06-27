@@ -91,11 +91,13 @@ export function subscribeToHabits(
 }
 
 export function subscribeToCompletionsForDate(
+  userId: string,
   date: string,
   callback: (completions: HabitCompletion[]) => void
 ): () => void {
   const q = query(
     collection(db, "habit_completions"),
+    where("userId", "==", userId),
     where("date", "==", date)
   );
 
@@ -147,7 +149,6 @@ export async function deleteHabit(habitId: string): Promise<void> {
 export async function saveCompletion(
   completion: HabitCompletion
 ): Promise<void> {
-  // Android's toFirestoreMap() does NOT include userId
   await setDoc(doc(db, "habit_completions", completion.id), {
     id: completion.id,
     habitId: completion.habitId,
@@ -156,6 +157,7 @@ export async function saveCompletion(
     counterValue: completion.counterValue,
     timerSeconds: completion.timerSeconds,
     completedAt: completion.completedAt,
+    userId: completion.userId,
   });
 }
 
@@ -245,10 +247,12 @@ export async function addTimerSeconds(
 // ---------------------------------------------------------------------------
 
 export async function getCompletionsForDate(
+  userId: string,
   date: string
 ): Promise<HabitCompletion[]> {
   const q = query(
     collection(db, "habit_completions"),
+    where("userId", "==", userId),
     where("date", "==", date)
   );
   const snapshot = await getDocs(q);
@@ -256,10 +260,12 @@ export async function getCompletionsForDate(
 }
 
 export async function getCompletionsForHabit(
+  userId: string,
   habitId: string
 ): Promise<HabitCompletion[]> {
   const q = query(
     collection(db, "habit_completions"),
+    where("userId", "==", userId),
     where("habitId", "==", habitId)
   );
   const snapshot = await getDocs(q);

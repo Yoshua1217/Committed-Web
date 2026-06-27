@@ -67,7 +67,7 @@ export default function HabitsPage() {
       setLoading(false);
     }));
 
-    unsubs.push(subscribeToCompletionsForDate(today, (c) => {
+    unsubs.push(subscribeToCompletionsForDate(user.uid, today, (c) => {
       setCompletions(c);
     }));
 
@@ -97,7 +97,7 @@ export default function HabitsPage() {
       const results = await Promise.all(
         habits.map(async (habit) => {
           try {
-            const hCompletions = await getCompletionsForHabit(habit.id);
+            const hCompletions = await getCompletionsForHabit(habit.userId, habit.id);
             return [habit.id, calculateStreak(habit, hCompletions)] as const;
           } catch {
             return [habit.id, { currentStreak: 0, currentAntiStreak: 0 }] as const;

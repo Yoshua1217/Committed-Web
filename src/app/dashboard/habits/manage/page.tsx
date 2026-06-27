@@ -113,7 +113,7 @@ export default function ManageHabitsPage() {
 
   // Load history data when habits are available
   useEffect(() => {
-    if (habits.length === 0) return;
+    if (!user || habits.length === 0) return;
     historyDays.forEach((dateStr) => {
       // Only load if not already loaded
       setDayDataMap((prev) => {
@@ -121,7 +121,7 @@ export default function ManageHabitsPage() {
         return { ...prev, [dateStr]: { date: dateStr, completions: [], scheduled: 0, completed: 0, loading: true } };
       });
 
-      getCompletionsForDate(dateStr).then((completions) => {
+      getCompletionsForDate(user.uid, dateStr).then((completions) => {
         const d = new Date(dateStr + "T12:00:00");
         const dow = jsDayToOurDay(d.getDay());
         const scheduled = habits.filter((h) => isScheduledForDay(h, dow));
@@ -140,7 +140,7 @@ export default function ManageHabitsPage() {
         }));
       });
     });
-  }, [habits, historyDays]);
+  }, [habits, historyDays, user]);
 
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
@@ -209,7 +209,11 @@ export default function ManageHabitsPage() {
     await Promise.all(promises);
 
     // Refresh this day's data
-    const freshCompletions = await getCompletionsForDate(editingDay);
+    if (!user) {
+      setSavingDay(false);
+      return;
+    }
+    const freshCompletions = await getCompletionsForDate(user.uid, editingDay);
     const d = new Date(editingDay + "T12:00:00");
     const dow = jsDayToOurDay(d.getDay());
     const scheduled = habits.filter((h) => isScheduledForDay(h, dow));
@@ -229,7 +233,7 @@ export default function ManageHabitsPage() {
 
     setSavingDay(false);
     setEditingDay(null);
-  }, [editingDay, editCompletions, dayDataMap, habits]);
+  }, [editingDay, editCompletions, dayDataMap, habits, user]);
 
   // Get scheduled habits for the editing day
   const editingDayScheduled = editingDay
