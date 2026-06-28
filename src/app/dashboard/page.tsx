@@ -27,6 +27,14 @@ function argbToHex(argb: number): string {
   return "#" + rgb.toString(16).padStart(6, "0").toUpperCase();
 }
 
+function offsetIsoDate(date: string, dayOffset: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const shifted = new Date(year, month - 1, day + dayOffset);
+  const shiftedMonth = String(shifted.getMonth() + 1).padStart(2, "0");
+  const shiftedDay = String(shifted.getDate()).padStart(2, "0");
+  return `${shifted.getFullYear()}-${shiftedMonth}-${shiftedDay}`;
+}
+
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -36,6 +44,7 @@ export default function DashboardHome() {
   const displayName = user?.displayName || user?.email?.split("@")[0] || "there";
 
   const today = todayString();
+  const previousDate = offsetIsoDate(today, -1);
   const now = new Date();
   const dateStr = `${dayNames[now.getDay()]}, ${monthNames[now.getMonth()]} ${now.getDate()}`;
 
@@ -44,6 +53,7 @@ export default function DashboardHome() {
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [dailyLog, setDailyLog] = useState<DailyLog | null>(null);
+  const [previousDailyLog, setPreviousDailyLog] = useState<DailyLog | null>(null);
   const [dailyLogOpen, setDailyLogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -55,8 +65,9 @@ export default function DashboardHome() {
     unsubs.push(subscribeToBuckets(user.uid, (b) => setBuckets(b)));
     unsubs.push(subscribeToGoals(user.uid, (g) => setGoals(g)));
     unsubs.push(subscribeToDailyLog(user.uid, today, setDailyLog));
+    unsubs.push(subscribeToDailyLog(user.uid, previousDate, setPreviousDailyLog));
     return () => unsubs.forEach((u) => u());
-  }, [user, today]);
+  }, [user, today, previousDate]);
 
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
@@ -76,6 +87,7 @@ export default function DashboardHome() {
   ].some((answer) => answer.trim().length > 0);
   const todoCount = todoHabits.length + (dailyLogCompleted ? 0 : 1);
   const completedCount = doneHabits.length + (dailyLogCompleted ? 1 : 0);
+  const previousCommitment = previousDailyLog?.improveTomorrow.trim() ?? "";
   // Calculate progress: counter/timer habits contribute fractionally
   const progressSum = scheduledHabits.reduce((sum, h) => {
     const comp = completionMap.get(h.id);
@@ -126,15 +138,16 @@ export default function DashboardHome() {
         <div className="flex-1 min-w-0">
           {/* Today's Progress Summary */}
           {!loading && scheduledHabits.length > 0 && (
-            <div
-              style={{
-                background: pct >= 100 ? "#4CAF5010" : "var(--surface)",
-                border: `1px solid ${pct >= 100 ? "#4CAF5040" : "var(--border)"}`,
-                borderRadius: 20,
-                padding: 24,
-                marginBottom: 24,
-              }}
-            >
+            <>
+              <div
+                style={{
+                  background: pct >= 100 ? "#4CAF5010" : "var(--surface)",
+                  border: `1px solid ${pct >= 100 ? "#4CAF5040" : "var(--border)"}`,
+                  borderRadius: 20,
+                  padding: 24,
+                  marginBottom: previousCommitment ? 12 : 24,
+                }}
+              >
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today&apos;s Progress</span>
                 <span style={{ fontSize: 24, fontWeight: 800, color: progressColor }}>
@@ -169,7 +182,21 @@ export default function DashboardHome() {
               <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0, marginTop: 10 }}>
                 {doneHabits.length} of {scheduledHabits.length} habits completed
               </p>
-            </div>
+              </div>
+              {previousCommitment && (
+                <p
+                  style={{
+                    margin: "0 4px 24px",
+                    color: "var(--secondary)",
+                    fontSize: 14,
+                    lineHeight: 1.6,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  &ldquo;{previousCommitment}&rdquo;
+                </p>
+              )}
+            </>
           )}
 
           {/* Buckets */}
