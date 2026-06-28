@@ -47,6 +47,10 @@ export default function HabitCard({
 }: HabitCardProps) {
   const bucketColor = bucket ? argbToHex(bucket.color) : "var(--accent)";
   const displayIcon = goal?.iconName || bucket?.iconName || "Category";
+  const displayedStreak = completed
+    ? (streak?.currentStreak ?? 0) + 1
+    : (streak?.currentStreak ?? 0);
+  const displayedAntiStreak = completed ? 0 : (streak?.currentAntiStreak ?? 0);
 
   // Progress for counter/timer
   let progress = 0;
@@ -96,16 +100,16 @@ export default function HabitCard({
           >
             {habit.name}
           </p>
-          {streak && (streak.currentStreak > 0 || streak.currentAntiStreak > 0) && (
+          {streak && (displayedStreak > 0 || displayedAntiStreak > 0) && (
             <div className="flex items-center gap-2" style={{ marginTop: 3 }}>
-              {streak.currentStreak > 0 && (
+              {displayedStreak > 0 && (
                 <span style={{ fontSize: 12, color: "#FF9800", fontWeight: 500 }}>
-                  🔥 {streak.currentStreak} day{streak.currentStreak !== 1 ? "s" : ""}
+                  🔥 {displayedStreak} day{displayedStreak !== 1 ? "s" : ""}
                 </span>
               )}
-              {streak.currentAntiStreak > 0 && (
+              {displayedAntiStreak > 0 && (
                 <span style={{ fontSize: 12, color: "#9C27B0", fontWeight: 500 }}>
-                  💔 {streak.currentAntiStreak} day{streak.currentAntiStreak !== 1 ? "s" : ""} off
+                  💔 {displayedAntiStreak} day{displayedAntiStreak !== 1 ? "s" : ""} off
                 </span>
               )}
             </div>
