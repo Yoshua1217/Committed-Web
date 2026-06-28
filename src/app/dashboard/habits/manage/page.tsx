@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
@@ -262,7 +262,7 @@ export default function ManageHabitsPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 32, maxWidth: 720 }}>
+      <div style={{ padding: 32, width: "100%" }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", marginBottom: 24, marginTop: 0 }}>Manage Habits</h1>
         <p style={{ fontSize: 14, color: "var(--secondary)", margin: 0 }}>Loading...</p>
       </div>
@@ -270,7 +270,7 @@ export default function ManageHabitsPage() {
   }
 
   return (
-    <div style={{ padding: 32, maxWidth: 720 }}>
+    <div style={{ padding: 32, width: "100%" }}>
       {/* Header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
         <div className="flex items-center gap-3">
@@ -335,22 +335,44 @@ export default function ManageHabitsPage() {
       {(["checkbox", "counter", "timer"] as const).map((type) => {
         const items = grouped[type];
         if (items.length === 0) return null;
+        const today = dateToString(new Date());
+        const activeItems = items.filter((habit) => !isHabitPausedOnDate(habit, today));
+        const pausedItems = items.filter((habit) => isHabitPausedOnDate(habit, today));
+        const orderedItems = [...activeItems, ...pausedItems];
 
         return (
           <div key={type} style={{ marginBottom: 32 }}>
             <h2 style={sectionHeaderStyle}>
               {TYPE_LABELS[type]} ({items.length})
             </h2>
-            <div className="flex flex-col" style={{ gap: 8 }}>
-              {items.map((habit) => {
+            <div className="habit-manage-grid">
+              {orderedItems.map((habit, index) => {
                 const goal = goalMap.get(habit.goalId);
                 const bucket = goal ? bucketMap.get(goal.bucketId) : bucketMap.get(habit.bucketId);
                 const isDeleting = deleteConfirm === habit.id;
                 const isPaused = isHabitPausedOnDate(habit, dateToString(new Date()));
 
                 return (
+                  <Fragment key={habit.id}>
+                  {index === activeItems.length && pausedItems.length > 0 && (
+                    <div
+                      className="flex items-center gap-2"
+                      style={{
+                        gridColumn: "1 / -1",
+                        marginTop: activeItems.length > 0 ? 12 : 0,
+                        color: "var(--secondary)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      <span>Paused</span>
+                      <span style={{ opacity: 0.55 }}>({pausedItems.length})</span>
+                      <span style={{ height: 1, flex: 1, backgroundColor: "var(--border)" }} />
+                    </div>
+                  )}
                   <div
-                    key={habit.id}
                     className="flex items-center gap-3"
                     style={{
                       backgroundColor: "var(--surface)",
@@ -481,6 +503,7 @@ export default function ManageHabitsPage() {
                       )}
                     </button>
                   </div>
+                  </Fragment>
                 );
               })}
             </div>
