@@ -18,16 +18,16 @@ export default function DailyLogCard({ completed, hasAnswers, onClick }: DailyLo
         alignItems: "center",
         gap: 13,
         padding: "14px 15px",
-        border: `1px solid ${completed ? "rgba(59, 130, 246, 0.3)" : "rgba(59, 130, 246, 0.5)"}`,
+        border: "1px solid rgba(59, 130, 246, 0.24)",
         borderRadius: 16,
         background: completed
-          ? "linear-gradient(135deg, rgba(37, 99, 235, 0.10), rgba(59, 130, 246, 0.05))"
-          : "linear-gradient(135deg, #2563EB, #3B82F6)",
-        color: completed ? "#3B82F6" : "#fff",
+          ? "rgba(37, 99, 235, 0.06)"
+          : "linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.07))",
+        color: "var(--primary)",
         cursor: "pointer",
         textAlign: "left",
-        boxShadow: completed ? "none" : "0 10px 26px rgba(37, 99, 235, 0.2)",
-        transition: "transform 0.15s ease, box-shadow 0.15s ease",
+        boxShadow: "none",
+        transition: "background-color 0.15s ease, border-color 0.15s ease",
       }}
     >
       <span
@@ -39,7 +39,8 @@ export default function DailyLogCard({ completed, hasAnswers, onClick }: DailyLo
           width: 36,
           height: 36,
           borderRadius: 11,
-          background: completed ? "rgba(59, 130, 246, 0.13)" : "rgba(255, 255, 255, 0.17)",
+          background: "rgba(59, 130, 246, 0.14)",
+          color: "#60A5FA",
           fontSize: 18,
         }}
       >
@@ -47,11 +48,11 @@ export default function DailyLogCard({ completed, hasAnswers, onClick }: DailyLo
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: "block", fontSize: 14, fontWeight: 750 }}>Daily log</span>
-        <span style={{ display: "block", marginTop: 2, fontSize: 11, opacity: 0.78 }}>
+        <span style={{ display: "block", marginTop: 2, fontSize: 11, color: "var(--secondary)" }}>
           {completed ? "Completed · Click to edit" : hasAnswers ? "In progress · Continue reflecting" : "Reflect on your day"}
         </span>
       </span>
-      <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1, opacity: 0.75 }}>&rsaquo;</span>
+      <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1, color: "#60A5FA", opacity: 0.8 }}>&rsaquo;</span>
     </button>
   );
 }

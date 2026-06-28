@@ -127,7 +127,7 @@ export default function DailyLogModal({
           maxHeight: "90vh",
           overflowY: "auto",
           borderRadius: 24,
-          border: "1px solid rgba(59, 130, 246, 0.32)",
+          border: "1px solid var(--border)",
           background: "var(--surface)",
           boxShadow: "0 28px 90px rgba(0, 0, 0, 0.42)",
         }}
@@ -229,7 +229,6 @@ export default function DailyLogModal({
                 fontWeight: 750,
                 cursor: saving ? "wait" : "pointer",
                 opacity: saving ? 0.65 : 1,
-                boxShadow: "0 8px 24px rgba(37, 99, 235, 0.25)",
               }}
             >
               Complete
