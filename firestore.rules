@@ -81,6 +81,12 @@ service cloud.firestore {
         && ownsHabit(request.resource.data.habitId);
     }
 
+    match /daily_logs/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
     // Settings use the Firebase Auth UID as the document ID.
     match /userSettings/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;

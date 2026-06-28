@@ -54,6 +54,20 @@ export interface HabitCompletion {
   userId: string;
 }
 
+export interface DailyLog {
+  id: string;
+  userId: string;
+  date: string; // ISO format "2026-03-03"
+  grateful: string;
+  learned: string;
+  struggled: string;
+  improveTomorrow: string;
+  completed: boolean;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+}
+
 export interface Label {
   id: string;
   name: string;

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
+import { Habit, HabitCompletion, Bucket, Goal, DailyLog } from "@/lib/types";
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
@@ -18,6 +18,9 @@ import { isScheduledForDate } from "@/lib/streak-calculator";
 import { getProgressColor } from "@/lib/progress-color";
 import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
+import DailyLogCard from "@/components/daily-log-card";
+import DailyLogModal from "@/components/daily-log-modal";
+import { saveDailyLog, subscribeToDailyLog } from "@/lib/daily-log-service";
 
 function argbToHex(argb: number): string {
   const rgb = argb & 0x00ffffff;
@@ -40,6 +43,8 @@ export default function DashboardHome() {
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [dailyLog, setDailyLog] = useState<DailyLog | null>(null);
+  const [dailyLogOpen, setDailyLogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,6 +54,7 @@ export default function DashboardHome() {
     unsubs.push(subscribeToCompletionsForDate(user.uid, today, (c) => setCompletions(c)));
     unsubs.push(subscribeToBuckets(user.uid, (b) => setBuckets(b)));
     unsubs.push(subscribeToGoals(user.uid, (g) => setGoals(g)));
+    unsubs.push(subscribeToDailyLog(user.uid, today, setDailyLog));
     return () => unsubs.forEach((u) => u());
   }, [user, today]);
 
@@ -61,6 +67,15 @@ export default function DashboardHome() {
   );
   const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed);
   const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed);
+  const dailyLogCompleted = dailyLog?.completed === true;
+  const dailyLogHasAnswers = !!dailyLog && [
+    dailyLog.grateful,
+    dailyLog.learned,
+    dailyLog.struggled,
+    dailyLog.improveTomorrow,
+  ].some((answer) => answer.trim().length > 0);
+  const todoCount = todoHabits.length + (dailyLogCompleted ? 0 : 1);
+  const completedCount = doneHabits.length + (dailyLogCompleted ? 1 : 0);
   // Calculate progress: counter/timer habits contribute fractionally
   const progressSum = scheduledHabits.reduce((sum, h) => {
     const comp = completionMap.get(h.id);
@@ -77,20 +92,20 @@ export default function DashboardHome() {
   const pct = scheduledHabits.length > 0 ? Math.round((progressSum / scheduledHabits.length) * 100) : 0;
   const progressColor = getProgressColor(pct);
 
-  const handleToggleCheckbox = useCallback(async (habit: Habit) => {
+  const handleToggleCheckbox = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
     await toggleCheckbox(habit, today, existing);
-  }, [completions, today]);
+  };
 
-  const handleIncrementCounter = useCallback(async (habit: Habit) => {
+  const handleIncrementCounter = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
     await incrementCounter(habit, today, existing);
-  }, [completions, today]);
+  };
 
-  const handleAddTimerSeconds = useCallback(async (habit: Habit, seconds: number) => {
+  const handleAddTimerSeconds = async (habit: Habit, seconds: number) => {
     const existing = completionMap.get(habit.id) ?? null;
     await addTimerSeconds(habit, today, existing, seconds);
-  }, [completions, today]);
+  };
 
   return (
     <div style={{ padding: 32 }}>
@@ -314,7 +329,7 @@ export default function DashboardHome() {
         </div>
 
         {/* RIGHT COLUMN — Today's Habits */}
-        {!loading && scheduledHabits.length > 0 && (
+        {!loading && (
           <div className="w-full lg:w-96 shrink-0">
             <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
               <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>
@@ -329,7 +344,7 @@ export default function DashboardHome() {
             </div>
 
             {/* To Do */}
-            {todoHabits.length > 0 && (
+            {todoCount > 0 && (
               <div style={{ marginBottom: 20 }}>
                 <h3 style={{
                   fontSize: 11,
@@ -340,7 +355,7 @@ export default function DashboardHome() {
                   margin: 0,
                   marginBottom: 8,
                 }}>
-                  To Do ({todoHabits.length})
+                  To Do ({todoCount})
                 </h3>
                 <div className="flex flex-col" style={{ gap: 8 }}>
                   {todoHabits.map((habit) => (
@@ -357,12 +372,19 @@ export default function DashboardHome() {
                       completed={false}
                     />
                   ))}
+                  {!dailyLogCompleted && (
+                    <DailyLogCard
+                      completed={false}
+                      hasAnswers={dailyLogHasAnswers}
+                      onClick={() => setDailyLogOpen(true)}
+                    />
+                  )}
                 </div>
               </div>
             )}
 
             {/* Completed */}
-            {doneHabits.length > 0 && (
+            {completedCount > 0 && (
               <div style={{ marginBottom: 20 }}>
                 <h3 style={{
                   fontSize: 11,
@@ -379,7 +401,7 @@ export default function DashboardHome() {
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
-                  Completed ({doneHabits.length})
+                  Completed ({completedCount})
                 </h3>
                 <div className="flex flex-col" style={{ gap: 8 }}>
                   {doneHabits.map((habit) => (
@@ -396,12 +418,19 @@ export default function DashboardHome() {
                       completed={true}
                     />
                   ))}
+                  {dailyLogCompleted && (
+                    <DailyLogCard
+                      completed={true}
+                      hasAnswers={dailyLogHasAnswers}
+                      onClick={() => setDailyLogOpen(true)}
+                    />
+                  )}
                 </div>
               </div>
             )}
 
             {/* All done state */}
-            {todoHabits.length === 0 && (
+            {todoCount === 0 && (
               <div
                 style={{
                   background: "#4CAF5010",
@@ -417,13 +446,23 @@ export default function DashboardHome() {
                   All done for today!
                 </p>
                 <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>
-                  {scheduledHabits.length} habit{scheduledHabits.length !== 1 ? "s" : ""} completed. Stay committed.
+                  {completedCount} item{completedCount !== 1 ? "s" : ""} completed. Stay committed.
                 </p>
               </div>
             )}
           </div>
         )}
       </div>
+      {user && (
+        <DailyLogModal
+          isOpen={dailyLogOpen}
+          dailyLog={dailyLog}
+          userId={user.uid}
+          date={today}
+          onSave={saveDailyLog}
+          onClose={() => setDailyLogOpen(false)}
+        />
+      )}
     </div>
   );
 }
