@@ -15,6 +15,7 @@ import {
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
 import { isScheduledForDate } from "@/lib/streak-calculator";
+import { getProgressColor } from "@/lib/progress-color";
 import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
 
@@ -74,6 +75,7 @@ export default function DashboardHome() {
     return sum;
   }, 0);
   const pct = scheduledHabits.length > 0 ? Math.round((progressSum / scheduledHabits.length) * 100) : 0;
+  const progressColor = getProgressColor(pct);
 
   const handleToggleCheckbox = useCallback(async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
@@ -120,18 +122,34 @@ export default function DashboardHome() {
             >
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today&apos;s Progress</span>
-                <span style={{ fontSize: 24, fontWeight: 800, color: pct >= 100 ? "#4CAF50" : "var(--primary)" }}>
+                <span style={{ fontSize: 24, fontWeight: 800, color: progressColor }}>
                   {pct}%
                 </span>
               </div>
-              <div style={{ height: 6, borderRadius: 9999, backgroundColor: "var(--surface-variant)", overflow: "hidden" }}>
+              <div style={{ height: 6, borderRadius: 9999, backgroundColor: "var(--surface-variant)", position: "relative" }}>
                 <div style={{
                   height: "100%",
                   borderRadius: 9999,
                   width: `${Math.min(pct, 100)}%`,
-                  backgroundColor: pct >= 100 ? "#4CAF50" : "var(--primary)",
-                  transition: "width 0.5s ease",
+                  backgroundColor: progressColor,
+                  transition: "width 0.5s ease, background-color 0.3s ease",
                 }} />
+                {pct === 0 && (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: "50%",
+                      width: 10,
+                      height: 10,
+                      borderRadius: "50%",
+                      backgroundColor: progressColor,
+                      transform: "translateY(-50%)",
+                      boxShadow: "0 0 0 3px var(--surface)",
+                    }}
+                  />
+                )}
               </div>
               <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0, marginTop: 10 }}>
                 {doneHabits.length} of {scheduledHabits.length} habits completed

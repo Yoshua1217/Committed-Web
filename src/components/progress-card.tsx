@@ -1,5 +1,7 @@
 "use client";
 
+import { getProgressColor } from "@/lib/progress-color";
+
 interface ProgressCardProps {
   totalScheduled: number;
   completedCount: number;
@@ -42,6 +44,7 @@ export default function ProgressCard({
 
   const pct = Math.round((completedCount / totalScheduled) * 100);
   const allDone = pct >= 100;
+  const progressColor = getProgressColor(pct);
 
   return (
     <div
@@ -65,7 +68,7 @@ export default function ProgressCard({
           style={{
             fontSize: 36,
             fontWeight: 800,
-            color: allDone ? "#4CAF50" : "var(--primary)",
+            color: progressColor,
             lineHeight: 1,
           }}
         >
@@ -78,12 +81,13 @@ export default function ProgressCard({
 
       {/* Progress bar */}
       <div
-        className="w-full overflow-hidden"
+        className="w-full"
         style={{
           height: 8,
           borderRadius: 9999,
           backgroundColor: "var(--surface-variant)",
           marginTop: 16,
+          position: "relative",
         }}
       >
         <div
@@ -91,10 +95,26 @@ export default function ProgressCard({
             height: "100%",
             borderRadius: 9999,
             width: `${Math.min(pct, 100)}%`,
-            backgroundColor: allDone ? "#4CAF50" : "var(--primary)",
-            transition: "width 0.5s ease",
+            backgroundColor: progressColor,
+            transition: "width 0.5s ease, background-color 0.3s ease",
           }}
         />
+        {pct === 0 && (
+          <span
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              left: 0,
+              top: "50%",
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              backgroundColor: progressColor,
+              transform: "translateY(-50%)",
+              boxShadow: "0 0 0 3px var(--surface)",
+            }}
+          />
+        )}
       </div>
 
       {/* Completed names */}
