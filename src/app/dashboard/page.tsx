@@ -26,13 +26,6 @@ function argbToHex(argb: number): string {
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-const quickLinks = [
-  { label: "Buckets", href: "/dashboard/buckets", icon: "category" },
-  { label: "Goals", href: "/dashboard/goals", icon: "flag" },
-  { label: "Habits", href: "/dashboard/habits", icon: "loop" },
-  { label: "Tasks", href: "/dashboard/tasks", icon: "task_alt" },
-];
-
 export default function DashboardHome() {
   const { user } = useAuth();
   const router = useRouter();
@@ -114,38 +107,6 @@ export default function DashboardHome() {
 
         {/* LEFT COLUMN */}
         <div className="flex-1 min-w-0">
-          {/* Quick Links */}
-          <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 28 }}>
-            {quickLinks.map((link) => (
-              <div
-                key={link.label}
-                onClick={() => router.push(link.href)}
-                style={{
-                  background: "var(--surface)",
-                  borderRadius: 16,
-                  border: "1px solid var(--border)",
-                  padding: "16px 18px",
-                  cursor: "pointer",
-                  transition: "border-color 0.15s",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--secondary)")}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-rounded" style={{ fontSize: 22, color: "var(--primary)" }}>
-                      {link.icon}
-                    </span>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: "var(--primary)" }}>
-                      {link.label}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: 16, color: "var(--secondary)" }}>&rarr;</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
           {/* Today's Progress Summary */}
           {!loading && scheduledHabits.length > 0 && (
             <div
