@@ -89,7 +89,7 @@ export default function BucketsPage() {
   return (
     <div style={{ padding: 32 }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+      <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <h1
           style={{
             fontSize: 24,
@@ -162,6 +162,7 @@ export default function BucketsPage() {
       {/* Bucket Grid */}
       {buckets.length > 0 && (
         <div
+          className="responsive-card-grid"
           style={{
             display: "grid",
             gap: 12,

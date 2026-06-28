@@ -81,7 +81,7 @@ export default function GoalsPage() {
   return (
     <div style={{ padding: 32, maxWidth: 720 }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+      <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>
           Goals
         </h1>

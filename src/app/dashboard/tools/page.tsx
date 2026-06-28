@@ -69,6 +69,7 @@ export default function ToolsPage() {
       </p>
 
       <div
+        className="responsive-card-grid"
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",

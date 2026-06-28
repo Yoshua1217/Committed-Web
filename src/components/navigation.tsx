@@ -235,11 +235,12 @@ export default function Navigation() {
 
       {/* Mobile Bottom Nav */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex justify-around items-center"
+        aria-label="Primary navigation"
+        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-40 flex items-center"
         style={{
           backgroundColor: "var(--surface)",
           borderTop: "1px solid var(--border)",
-          padding: "12px 4px 14px",
+          padding: "8px 8px calc(8px + env(safe-area-inset-bottom))",
         }}
       >
         {navItems.map((item) => {
@@ -250,10 +251,10 @@ export default function Navigation() {
             <button
               key={item.path}
               onClick={() => router.push(item.path)}
-              className="flex flex-col items-center"
+              className="mobile-nav-item flex flex-col items-center justify-center"
               style={{
                 gap: 4,
-                padding: "4px 8px",
+                padding: "5px 8px",
                 background: "none",
                 border: "none",
                 cursor: "pointer",

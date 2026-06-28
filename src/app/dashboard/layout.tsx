@@ -32,7 +32,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }}>
       <Navigation />
-      <main className="sidebar-offset mobile-nav-offset min-h-screen">
+      <main className="dashboard-content sidebar-offset mobile-nav-offset min-h-screen">
         {children}
       </main>
     </div>

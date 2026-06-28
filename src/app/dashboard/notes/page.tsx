@@ -155,7 +155,7 @@ export default function NotesPage() {
   return (
     <div style={{ padding: 32, maxWidth: 1080 }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 32 }}>
+      <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>Notes</h1>
         <div className="flex gap-2">
           <button
@@ -284,7 +284,7 @@ export default function NotesPage() {
             </div>
 
             {/* Note Cards Grid */}
-            <div style={{
+            <div className="responsive-card-grid" style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
               gap: 16,
@@ -340,7 +340,7 @@ export default function NotesPage() {
            <h2 style={sectionHeaderStyle}>
              Unlabelled Notes
            </h2>
-           <div style={{
+            <div className="responsive-card-grid" style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
               gap: 16,

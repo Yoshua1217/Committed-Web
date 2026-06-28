@@ -153,11 +153,11 @@ export default function PromptLibraryPage() {
   const unlabelledPrompts = prompts.filter((p) => p.labelIds.length === 0);
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 0px)" }}>
+    <div className="prompt-library-shell" style={{ display: "flex", height: "calc(100vh - 0px)" }}>
       {/* Main Content Area */}
       <div style={{ flex: 1, padding: 32, overflowY: "auto" }}>
         {/* Header */}
-        <div className="flex items-center justify-between" style={{ marginBottom: 32 }}>
+        <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 32 }}>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>Prompt Library</h1>
           <div className="flex gap-2">
            <button
@@ -302,7 +302,7 @@ export default function PromptLibraryPage() {
             </div>
 
             {/* Prompt Cards Grid */}
-            <div style={{
+            <div className="responsive-card-grid" style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", // Slightly wider for prompts
               gap: 16,
@@ -359,7 +359,7 @@ export default function PromptLibraryPage() {
            <h2 style={sectionHeaderStyle}>
              Unlabelled Prompts
            </h2>
-           <div style={{
+            <div className="responsive-card-grid" style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
               gap: 16,

@@ -72,7 +72,7 @@ export default function TasksPage() {
   return (
     <div style={{ padding: "32px 28px", maxWidth: 720, width: "100%" }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 28 }}>
+      <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 28 }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: "var(--primary)", margin: 0 }}>
           Tasks
         </h1>

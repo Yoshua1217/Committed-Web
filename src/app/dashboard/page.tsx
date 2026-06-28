@@ -120,7 +120,7 @@ export default function DashboardHome() {
   };
 
   return (
-    <div style={{ padding: 32 }}>
+    <div className="dashboard-home" style={{ padding: 32 }}>
       {/* Greeting + Date */}
       <div style={{ marginBottom: 32 }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, color: "var(--primary)", margin: 0, marginBottom: 4 }}>
@@ -132,13 +132,13 @@ export default function DashboardHome() {
       </div>
 
       {/* Two-column layout: left = overview, right = today's habits */}
-      <div className="flex flex-col lg:flex-row gap-8" style={{ alignItems: "flex-start" }}>
+      <div className="dashboard-home-grid flex flex-col lg:flex-row gap-8" style={{ alignItems: "flex-start" }}>
 
         {/* LEFT COLUMN */}
-        <div className="flex-1 min-w-0">
+        <div className="home-overview flex-1 min-w-0">
           {/* Today's Progress Summary */}
           {!loading && scheduledHabits.length > 0 && (
-            <>
+            <div className="home-progress">
               <div
                 style={{
                   background: pct >= 100 ? "#4CAF5010" : "var(--surface)",
@@ -196,12 +196,12 @@ export default function DashboardHome() {
                   &ldquo;{previousCommitment}&rdquo;
                 </p>
               )}
-            </>
+            </div>
           )}
 
           {/* Buckets */}
           {buckets.length > 0 && (
-            <div style={{ marginBottom: 28 }}>
+            <div className="home-secondary" style={{ marginBottom: 28 }}>
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
                 <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>
                   Your Buckets
@@ -248,7 +248,7 @@ export default function DashboardHome() {
 
           {/* Goals with descriptions */}
           {goals.length > 0 && (
-            <div style={{ marginBottom: 28 }}>
+            <div className="home-secondary" style={{ marginBottom: 28 }}>
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
                 <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>
                   Your Goals
@@ -322,6 +322,7 @@ export default function DashboardHome() {
           {/* No habits at all */}
           {!loading && habits.length === 0 && (
             <div
+              className="home-secondary"
               style={{
                 background: "var(--surface)",
                 border: "1px solid var(--border)",
@@ -357,7 +358,7 @@ export default function DashboardHome() {
 
         {/* RIGHT COLUMN — Today's Habits */}
         {!loading && (
-          <div className="w-full lg:w-96 shrink-0">
+          <div className="home-habits w-full lg:w-96 shrink-0">
             <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
               <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>
                 Today&apos;s Habits

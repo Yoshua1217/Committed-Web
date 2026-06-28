@@ -272,7 +272,7 @@ export default function ManageHabitsPage() {
   return (
     <div style={{ padding: 32, width: "100%" }}>
       {/* Header */}
-      <div className="flex items-center justify-between" style={{ marginBottom: 24 }}>
+      <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push("/dashboard/habits")}

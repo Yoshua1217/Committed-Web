@@ -38,6 +38,22 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+html {
+  min-width: 320px;
+  overflow-x: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  touch-action: manipulation;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -84,6 +100,121 @@ input:focus, textarea:focus {
 /* Mobile bottom nav padding */
 @media (max-width: 767px) {
   .mobile-nav-offset {
-    padding-bottom: 5rem;
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+
+  .dashboard-content {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  /* Every dashboard route uses a direct page shell. This normalizes the
+     desktop inline spacing without requiring each screen to drift separately. */
+  .dashboard-content > div:not(.dashboard-home) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .dashboard-content > div:not(.dashboard-home):not(.prompt-library-shell):not([class*="flex-col"]) {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .prompt-library-shell > div:first-child {
+    padding: 20px 16px !important;
+  }
+
+  .mobile-page-header {
+    align-items: flex-start !important;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .mobile-page-header > :last-child {
+    max-width: 100%;
+  }
+
+  .responsive-card-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .dashboard-home {
+    padding: 20px 16px 24px !important;
+  }
+
+  .dashboard-home > div:first-child {
+    margin-bottom: 22px !important;
+  }
+
+  .dashboard-home h1 {
+    font-size: 24px !important;
+    line-height: 1.2;
+  }
+
+  .dashboard-home-grid {
+    gap: 24px !important;
+  }
+
+  .home-overview {
+    display: contents;
+  }
+
+  .home-progress {
+    order: 1;
+  }
+
+  .home-habits {
+    order: 2;
+  }
+
+  .home-secondary {
+    order: 3;
+  }
+
+  .mobile-bottom-nav {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-bottom-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-nav-item {
+    flex: 1 0 64px;
+    min-width: 64px;
+    min-height: 52px;
+  }
+
+  /* Prevent iOS form zoom and make controls reliably finger-sized. */
+  input,
+  textarea,
+  select {
+    max-width: 100%;
+    font-size: 16px !important;
+  }
+
+  button {
+    min-height: 40px;
+  }
+
+  /* Modals stay inside the visual viewport, including notched devices. */
+  [style*='position: fixed'][style*='inset: 0'] {
+    padding: 12px !important;
+  }
+
+  [style*='position: fixed'][style*='inset: 0'] > div {
+    max-width: 100% !important;
+    max-height: calc(100dvh - 24px) !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .habit-manage-grid {
+    gap: 10px;
   }
 }
