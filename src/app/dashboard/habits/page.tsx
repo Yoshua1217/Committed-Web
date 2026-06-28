@@ -110,10 +110,10 @@ export default function HabitsPage() {
   }, [habits, streakVersion]);
 
   // Filter to today's scheduled habits
+  const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const scheduledHabits = habits.filter((h) =>
     isScheduledForDate(h, today) || completionMap.get(h.id)?.completed
   );
-  const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
 
