@@ -58,6 +58,28 @@ export default function DailyLogModal({
 
   const persist = async (complete: boolean) => {
     if (saving) return;
+
+    const initialAnswers: Record<AnswerKey, string> = {
+      grateful: dailyLog?.grateful ?? "",
+      learned: dailyLog?.learned ?? "",
+      struggled: dailyLog?.struggled ?? "",
+      improveTomorrow: dailyLog?.improveTomorrow ?? "",
+    };
+    const answersChanged = questions.some(
+      ({ key }) => answers[key] !== initialAnswers[key]
+    );
+    const completionChanged = complete && dailyLog?.completed !== true;
+    const hasText = questions.some(({ key }) => answers[key].trim().length > 0);
+    const initiallyHadText = questions.some(
+      ({ key }) => initialAnswers[key].trim().length > 0
+    );
+
+    // A blank new log or an unchanged existing log should close without a write.
+    if ((!answersChanged && !completionChanged) || (!hasText && !initiallyHadText)) {
+      onClose();
+      return;
+    }
+
     setSaving(true);
     const now = Date.now();
     const completed = complete || dailyLog?.completed === true;
