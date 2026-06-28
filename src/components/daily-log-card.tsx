@@ -22,7 +22,7 @@ export default function DailyLogCard({ completed, hasAnswers, onClick }: DailyLo
         borderRadius: 16,
         background: completed
           ? "rgba(37, 99, 235, 0.06)"
-          : "linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.07))",
+          : "rgba(37, 99, 235, 0.12)",
         color: "var(--primary)",
         cursor: "pointer",
         textAlign: "left",
