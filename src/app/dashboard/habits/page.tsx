@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Habit, HabitCompletion, Bucket, Goal, StreakInfo } from "@/lib/types";
+import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
@@ -13,11 +13,10 @@ import {
   addTimerSeconds,
   saveHabit,
   deleteHabit,
-  getCompletionsForHabit,
 } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { calculateStreak, isScheduledForDate } from "@/lib/streak-calculator";
+import { isScheduledForDate } from "@/lib/streak-calculator";
 import HabitCard from "@/components/habit-card";
 import ProgressCard from "@/components/progress-card";
 import CongratsPopup from "@/components/congrats-popup";
@@ -46,11 +45,13 @@ export default function HabitsPage() {
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [streaks, setStreaks] = useState<Record<string, StreakInfo>>({});
   const [loading, setLoading] = useState(true);
   const [congratsHabit, setCongratsHabit] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
+  const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ habitId: string; position: "before" | "after" } | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   // Subscribe to real-time data
   useEffect(() => {
@@ -77,39 +78,6 @@ export default function HabitsPage() {
     return () => unsubs.forEach((u) => u());
   }, [user, today]);
 
-  // Refresh streaks
-  const [streakVersion, setStreakVersion] = useState(0);
-  useEffect(() => {
-    const timer = setTimeout(() => setStreakVersion((v) => v + 1), 500);
-    return () => clearTimeout(timer);
-  }, [completions]);
-
-  useEffect(() => {
-    if (habits.length === 0) return;
-    let cancelled = false;
-
-    async function refresh() {
-      const results = await Promise.all(
-        habits.map(async (habit) => {
-          try {
-            const hCompletions = await getCompletionsForHabit(habit.userId, habit.id);
-            return [habit.id, calculateStreak(habit, hCompletions)] as const;
-          } catch {
-            return [habit.id, { currentStreak: 0, currentAntiStreak: 0 }] as const;
-          }
-        })
-      );
-      if (!cancelled) {
-        const newStreaks: Record<string, StreakInfo> = {};
-        for (const [id, info] of results) newStreaks[id] = info;
-        setStreaks(newStreaks);
-      }
-    }
-
-    refresh();
-    return () => { cancelled = true; };
-  }, [habits, streakVersion]);
-
   // Filter to today's scheduled habits
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const scheduledHabits = habits.filter((h) =>
@@ -121,23 +89,23 @@ export default function HabitsPage() {
   const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed);
   const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed);
 
-  const handleToggleCheckbox = useCallback(async (habit: Habit) => {
+  const handleToggleCheckbox = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
     const result = await toggleCheckbox(habit, today, existing);
     if (result.completed) setCongratsHabit(habit.name);
-  }, [completions, today]);
+  };
 
-  const handleIncrementCounter = useCallback(async (habit: Habit) => {
+  const handleIncrementCounter = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
     const result = await incrementCounter(habit, today, existing);
     if (result.completed && !existing?.completed) setCongratsHabit(habit.name);
-  }, [completions, today]);
+  };
 
-  const handleAddTimerSeconds = useCallback(async (habit: Habit, seconds: number) => {
+  const handleAddTimerSeconds = async (habit: Habit, seconds: number) => {
     const existing = completionMap.get(habit.id) ?? null;
     const result = await addTimerSeconds(habit, today, existing, seconds);
     if (result.completed && !existing?.completed) setCongratsHabit(habit.name);
-  }, [completions, today]);
+  };
 
   const handleSaveHabit = async (habit: Habit) => {
     try {
@@ -155,6 +123,47 @@ export default function HabitsPage() {
     }
   };
 
+  const handleDropHabit = async (targetHabitId: string, event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const sourceHabitId = draggedHabitId;
+    setDraggedHabitId(null);
+    setDropTarget(null);
+    if (!sourceHabitId || sourceHabitId === targetHabitId || savingOrder) return;
+
+    const sourceIndex = habits.findIndex((habit) => habit.id === sourceHabitId);
+    const targetIndex = habits.findIndex((habit) => habit.id === targetHabitId);
+    if (sourceIndex < 0 || targetIndex < 0) return;
+
+    const reordered = [...habits];
+    const [movedHabit] = reordered.splice(sourceIndex, 1);
+    const targetIndexAfterRemoval = reordered.findIndex((habit) => habit.id === targetHabitId);
+    const targetBounds = event.currentTarget.getBoundingClientRect();
+    const insertAfterTarget = event.clientY > targetBounds.top + targetBounds.height / 2;
+    reordered.splice(targetIndexAfterRemoval + (insertAfterTarget ? 1 : 0), 0, movedHabit);
+
+    const savedOrder = reordered.map((habit, index) => ({ ...habit, sortOrder: index }));
+    setHabits(savedOrder);
+    setSavingOrder(true);
+    try {
+      await Promise.all(savedOrder.map((habit) => saveHabit(habit)));
+    } catch (error) {
+      console.error("Failed to save habit order:", error);
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  const handleDragOverHabit = (habitId: string, event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (!draggedHabitId || draggedHabitId === habitId) {
+      setDropTarget(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setDropTarget({ habitId, position: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after" });
+  };
+
   if (loading) {
     return (
       <div style={{ padding: 32, maxWidth: 720 }}>
@@ -165,7 +174,7 @@ export default function HabitsPage() {
   }
 
   return (
-    <div style={{ padding: 32, maxWidth: 720 }}>
+    <div style={{ padding: 32, maxWidth: 1280 }}>
       {/* Header */}
       <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>Habits</h1>
@@ -209,112 +218,62 @@ export default function HabitsPage() {
         </div>
       </div>
 
-      {/* Today's Progress */}
-      <div style={{ marginBottom: 24 }}>
-        <ProgressCard
-          totalScheduled={scheduledHabits.length}
-          completedCount={doneHabits.length}
-          completedNames={doneHabits.map((h) => h.name)}
-        />
+      <div className="habits-page-grid flex flex-col lg:flex-row gap-8" style={{ alignItems: "flex-start" }}>
+        <div className="flex-1 min-w-0">
+          <div style={{ marginBottom: 24 }}>
+            <ProgressCard totalScheduled={scheduledHabits.length} completedCount={doneHabits.length} completedNames={doneHabits.map((h) => h.name)} />
+          </div>
+          {habits.length > 0 ? (
+            <HabitCompletionChart userId={user?.uid ?? ""} habits={habits} todayCompletions={completions} />
+          ) : (
+            <div className="text-center" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)", borderRadius: 20, padding: 48 }}>
+              <p style={{ fontSize: 14, fontWeight: 500, color: "var(--primary)", margin: "0 0 4px" }}>No habits yet</p>
+              <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>Create your first habit to start tracking.</p>
+            </div>
+          )}
+        </div>
+
+        <aside className="home-habits w-full lg:w-80 shrink-0">
+          <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>Today&apos;s Habits</h2>
+            <span style={{ color: "var(--secondary)", fontSize: 11, fontWeight: 600 }}>{savingOrder ? "Saving…" : "Drag to order"}</span>
+          </div>
+          {todoHabits.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={sectionHeaderStyle}>To Do ({todoHabits.length})</h3>
+              <div className="flex flex-col" style={{ gap: 8 }}>
+                {todoHabits.map((habit) => (
+                  <div key={habit.id} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
+                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed={false} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {doneHabits.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{ ...sectionHeaderStyle, color: "#4CAF50" }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                Completed ({doneHabits.length})
+              </h3>
+              <div className="flex flex-col" style={{ gap: 8 }}>
+                {doneHabits.map((habit) => (
+                  <div key={habit.id} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
+                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {todoHabits.length === 0 && (
+            <div style={{ background: "#4CAF5010", border: "1px solid #4CAF5030", borderRadius: 20, padding: "28px 20px", textAlign: "center" }}>
+              <div style={{ fontSize: 32, marginBottom: 6 }}>&#10003;</div>
+              <p style={{ fontSize: 15, fontWeight: 700, color: "#4CAF50", margin: "0 0 4px" }}>All done for today!</p>
+              <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>{doneHabits.length} item{doneHabits.length !== 1 ? "s" : ""} completed. Stay committed.</p>
+            </div>
+          )}
+        </aside>
       </div>
-
-      {habits.length > 0 && (
-        <div style={{ marginBottom: 28 }}>
-          <HabitCompletionChart userId={user?.uid ?? ""} habits={habits} todayCompletions={completions} />
-        </div>
-      )}
-
-      {/* Empty state */}
-      {habits.length === 0 && (
-        <div
-          className="text-center"
-          style={{
-            backgroundColor: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 20,
-            paddingTop: 48,
-            paddingBottom: 48,
-            paddingLeft: 24,
-            paddingRight: 24,
-          }}
-        >
-          <p style={{ fontSize: 14, fontWeight: 500, color: "var(--primary)", margin: 0, marginBottom: 4 }}>No habits yet</p>
-          <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>Create your first habit to start tracking.</p>
-        </div>
-      )}
-
-      {/* TO DO section */}
-      {todoHabits.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={sectionHeaderStyle}>
-            To Do
-          </h2>
-          <div className="flex flex-col" style={{ gap: 8 }}>
-            {todoHabits.map((habit) => (
-              <div key={habit.id} onClick={() => { setEditingHabit(habit); setModalOpen(true); }} style={{ cursor: "pointer" }}>
-                <HabitCard
-                  habit={habit}
-                  completion={completionMap.get(habit.id) ?? null}
-                  bucket={bucketMap.get(habit.bucketId) ?? null}
-                  goal={goalMap.get(habit.goalId) ?? null}
-                  streak={streaks[habit.id] ?? null}
-                  onToggleCheckbox={() => handleToggleCheckbox(habit)}
-                  onIncrementCounter={() => handleIncrementCounter(habit)}
-                  onAddTimerSeconds={(s) => handleAddTimerSeconds(habit, s)}
-                  completed={false}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* COMPLETED section */}
-      {doneHabits.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={{ ...sectionHeaderStyle, color: "#4CAF50" }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4CAF50" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            Completed
-          </h2>
-          <div className="flex flex-col" style={{ gap: 8 }}>
-            {doneHabits.map((habit) => (
-              <div key={habit.id} onClick={() => { setEditingHabit(habit); setModalOpen(true); }} style={{ cursor: "pointer" }}>
-                <HabitCard
-                  habit={habit}
-                  completion={completionMap.get(habit.id) ?? null}
-                  bucket={bucketMap.get(habit.bucketId) ?? null}
-                  goal={goalMap.get(habit.goalId) ?? null}
-                  streak={streaks[habit.id] ?? null}
-                  onToggleCheckbox={() => handleToggleCheckbox(habit)}
-                  onIncrementCounter={() => handleIncrementCounter(habit)}
-                  onAddTimerSeconds={(s) => handleAddTimerSeconds(habit, s)}
-                  completed={true}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* No scheduled habits today (but habits exist) */}
-      {habits.length > 0 && scheduledHabits.length === 0 && (
-        <div
-          className="text-center"
-          style={{
-            backgroundColor: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: 20,
-            paddingTop: 48,
-            paddingBottom: 48,
-            paddingLeft: 24,
-            paddingRight: 24,
-          }}
-        >
-          <p style={{ fontSize: 14, color: "var(--secondary)", margin: 0 }}>No habits scheduled for today</p>
-        </div>
-      )}
 
       {/* Congrats popup */}
       <CongratsPopup habitName={congratsHabit} onDismiss={() => setCongratsHabit(null)} />

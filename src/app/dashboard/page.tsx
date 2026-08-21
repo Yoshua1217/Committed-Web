@@ -320,7 +320,7 @@ export default function DashboardHome() {
 
         {/* RIGHT COLUMN — Today's Habits */}
         {!loading && (
-          <div className="home-habits w-full lg:w-96 shrink-0">
+          <div className="home-habits w-full lg:w-80 shrink-0">
             <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
               <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>
                 Today&apos;s Habits

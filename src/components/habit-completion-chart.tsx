@@ -89,7 +89,6 @@ export default function HabitCompletionChart({ userId, habits, todayCompletions 
   const xFor = (index: number) => padding.left + (points.length === 1 ? 0 : (index / (points.length - 1)) * plotWidth);
   const yFor = (value: number) => padding.top + ((100 - value) / 100) * plotHeight;
   const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${xFor(index).toFixed(2)} ${yFor(point.value).toFixed(2)}`).join(" ");
-  const areaPath = `${linePath} L ${xFor(points.length - 1)} ${padding.top + plotHeight} L ${xFor(0)} ${padding.top + plotHeight} Z`;
   const hovered = hoveredIndex === null ? null : points[hoveredIndex];
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -103,7 +102,7 @@ export default function HabitCompletionChart({ userId, habits, todayCompletions 
     <section style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 22, padding: "20px 16px 14px", overflow: "hidden", boxShadow: "0 14px 34px rgba(0,0,0,0.04)" }}>
       <div className="habit-chart-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14, marginBottom: 10 }}>
         <div>
-          <p style={{ color: "var(--primary)", fontSize: 16, fontWeight: 750, margin: 0 }}>Completion trend</p>
+          <p style={{ color: "var(--primary)", fontSize: 16, fontWeight: 750, margin: 0 }}>Completion graph</p>
           <p style={{ color: "var(--secondary)", fontSize: 12, margin: "4px 0 0" }}>Daily habit progress · hover for details</p>
         </div>
         <div role="group" aria-label="Completion chart range" style={{ display: "flex", background: "var(--surface-variant)", padding: 3, borderRadius: 11 }}>
@@ -121,12 +120,8 @@ export default function HabitCompletionChart({ userId, habits, todayCompletions 
               <linearGradient id="habit-line-gradient" x1="0" y1="0" x2="1" y2="0">
                 {points.map((point, index) => <stop key={point.date} offset={`${(index / Math.max(points.length - 1, 1)) * 100}%`} stopColor={colorFor(point.value)} />)}
               </linearGradient>
-              <linearGradient id="habit-area-gradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#28b66f" stopOpacity="0.18" /><stop offset="100%" stopColor="#28b66f" stopOpacity="0" />
-              </linearGradient>
             </defs>
             {[0, 25, 50, 75, 100].map((value) => <g key={value}><line x1={padding.left} x2={chartWidth - padding.right} y1={yFor(value)} y2={yFor(value)} stroke="var(--border)" strokeWidth="1" strokeDasharray={value === 0 ? "0" : "3 5"} /><text x={padding.left - 8} y={yFor(value) + 4} textAnchor="end" fill="var(--secondary)" fontSize="10" fontWeight="600">{value}%</text></g>)}
-            <path d={areaPath} fill="url(#habit-area-gradient)" />
             <path d={linePath} fill="none" stroke="url(#habit-line-gradient)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
             {hoveredIndex !== null && <><line x1={xFor(hoveredIndex)} x2={xFor(hoveredIndex)} y1={padding.top} y2={padding.top + plotHeight} stroke="var(--secondary)" opacity="0.3" strokeDasharray="3 4" /><circle cx={xFor(hoveredIndex)} cy={yFor(points[hoveredIndex].value)} r="6" fill="var(--surface)" stroke={colorFor(points[hoveredIndex].value)} strokeWidth="3" /></>}
             {[0, Math.floor((points.length - 1) / 2), points.length - 1].map((index) => <text key={index} x={xFor(index)} y={chartHeight - 10} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fill="var(--secondary)" fontSize="10" fontWeight="600">{points[index].label}</text>)}
