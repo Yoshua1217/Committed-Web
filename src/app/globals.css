@@ -116,13 +116,9 @@ input:focus, textarea:focus {
     max-width: 100% !important;
   }
 
-  .dashboard-content > div:not(.dashboard-home):not(.prompt-library-shell):not([class*="flex-col"]) {
+  .dashboard-content > div:not(.dashboard-home):not([class*="flex-col"]) {
     padding-left: 16px !important;
     padding-right: 16px !important;
-  }
-
-  .prompt-library-shell > div:first-child {
-    padding: 20px 16px !important;
   }
 
   .mobile-page-header {
@@ -166,6 +162,10 @@ input:focus, textarea:focus {
 
   .home-habits {
     order: 2;
+  }
+
+  .habit-chart-heading {
+    flex-wrap: wrap;
   }
 
   .home-secondary {

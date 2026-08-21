@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Habit, HabitCompletion, Bucket, Goal, DailyLog } from "@/lib/types";
+import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
@@ -18,21 +18,10 @@ import { isScheduledForDate } from "@/lib/streak-calculator";
 import { getProgressColor } from "@/lib/progress-color";
 import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
-import DailyLogCard from "@/components/daily-log-card";
-import DailyLogModal from "@/components/daily-log-modal";
-import { saveDailyLog, subscribeToDailyLog } from "@/lib/daily-log-service";
 
 function argbToHex(argb: number): string {
   const rgb = argb & 0x00ffffff;
   return "#" + rgb.toString(16).padStart(6, "0").toUpperCase();
-}
-
-function offsetIsoDate(date: string, dayOffset: number): string {
-  const [year, month, day] = date.split("-").map(Number);
-  const shifted = new Date(year, month - 1, day + dayOffset);
-  const shiftedMonth = String(shifted.getMonth() + 1).padStart(2, "0");
-  const shiftedDay = String(shifted.getDate()).padStart(2, "0");
-  return `${shifted.getFullYear()}-${shiftedMonth}-${shiftedDay}`;
 }
 
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -44,7 +33,6 @@ export default function DashboardHome() {
   const displayName = user?.displayName || user?.email?.split("@")[0] || "there";
 
   const today = todayString();
-  const previousDate = offsetIsoDate(today, -1);
   const now = new Date();
   const dateStr = `${dayNames[now.getDay()]}, ${monthNames[now.getMonth()]} ${now.getDate()}`;
 
@@ -52,9 +40,6 @@ export default function DashboardHome() {
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [dailyLog, setDailyLog] = useState<DailyLog | null>(null);
-  const [previousDailyLog, setPreviousDailyLog] = useState<DailyLog | null>(null);
-  const [dailyLogOpen, setDailyLogOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -64,10 +49,8 @@ export default function DashboardHome() {
     unsubs.push(subscribeToCompletionsForDate(user.uid, today, (c) => setCompletions(c)));
     unsubs.push(subscribeToBuckets(user.uid, (b) => setBuckets(b)));
     unsubs.push(subscribeToGoals(user.uid, (g) => setGoals(g)));
-    unsubs.push(subscribeToDailyLog(user.uid, today, setDailyLog));
-    unsubs.push(subscribeToDailyLog(user.uid, previousDate, setPreviousDailyLog));
     return () => unsubs.forEach((u) => u());
-  }, [user, today, previousDate]);
+  }, [user, today]);
 
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
@@ -78,16 +61,8 @@ export default function DashboardHome() {
   );
   const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed);
   const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed);
-  const dailyLogCompleted = dailyLog?.completed === true;
-  const dailyLogHasAnswers = !!dailyLog && [
-    dailyLog.grateful,
-    dailyLog.learned,
-    dailyLog.struggled,
-    dailyLog.improveTomorrow,
-  ].some((answer) => answer.trim().length > 0);
-  const todoCount = todoHabits.length + (dailyLogCompleted ? 0 : 1);
-  const completedCount = doneHabits.length + (dailyLogCompleted ? 1 : 0);
-  const previousCommitment = previousDailyLog?.improveTomorrow.trim() ?? "";
+  const todoCount = todoHabits.length;
+  const completedCount = doneHabits.length;
   // Calculate progress: counter/timer habits contribute fractionally
   const progressSum = scheduledHabits.reduce((sum, h) => {
     const comp = completionMap.get(h.id);
@@ -145,7 +120,7 @@ export default function DashboardHome() {
                   border: `1px solid ${pct >= 100 ? "#4CAF5040" : "var(--border)"}`,
                   borderRadius: 20,
                   padding: 24,
-                  marginBottom: previousCommitment ? 12 : 24,
+                  marginBottom: 24,
                 }}
               >
               <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
@@ -183,19 +158,6 @@ export default function DashboardHome() {
                 {doneHabits.length} of {scheduledHabits.length} habits completed
               </p>
               </div>
-              {previousCommitment && (
-                <p
-                  style={{
-                    margin: "0 4px 24px",
-                    color: "var(--secondary)",
-                    fontSize: 14,
-                    lineHeight: 1.6,
-                    overflowWrap: "anywhere",
-                  }}
-                >
-                  &ldquo;{previousCommitment}&rdquo;
-                </p>
-              )}
             </div>
           )}
 
@@ -400,13 +362,6 @@ export default function DashboardHome() {
                       completed={false}
                     />
                   ))}
-                  {!dailyLogCompleted && (
-                    <DailyLogCard
-                      completed={false}
-                      hasAnswers={dailyLogHasAnswers}
-                      onClick={() => setDailyLogOpen(true)}
-                    />
-                  )}
                 </div>
               </div>
             )}
@@ -446,13 +401,6 @@ export default function DashboardHome() {
                       completed={true}
                     />
                   ))}
-                  {dailyLogCompleted && (
-                    <DailyLogCard
-                      completed={true}
-                      hasAnswers={dailyLogHasAnswers}
-                      onClick={() => setDailyLogOpen(true)}
-                    />
-                  )}
                 </div>
               </div>
             )}
@@ -481,16 +429,6 @@ export default function DashboardHome() {
           </div>
         )}
       </div>
-      {user && (
-        <DailyLogModal
-          isOpen={dailyLogOpen}
-          dailyLog={dailyLog}
-          userId={user.uid}
-          date={today}
-          onSave={saveDailyLog}
-          onClose={() => setDailyLogOpen(false)}
-        />
-      )}
     </div>
   );
 }

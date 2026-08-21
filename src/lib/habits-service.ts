@@ -263,6 +263,18 @@ export async function getCompletionsForDate(
   return snapshot.docs.map((d) => d.data() as HabitCompletion);
 }
 
+/** Fetch a user's completion history for progress and reporting views. */
+export async function getCompletionsForUser(
+  userId: string
+): Promise<HabitCompletion[]> {
+  const q = query(
+    collection(db, "habit_completions"),
+    where("userId", "==", userId)
+  );
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => d.data() as HabitCompletion);
+}
+
 export async function getCompletionsForHabit(
   userId: string,
   habitId: string

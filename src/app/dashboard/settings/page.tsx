@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { UserSettings } from "@/lib/types";
 import { subscribeToSettings, saveSettings } from "@/lib/settings-service";
+import { resetAccountData } from "@/lib/account-reset-service";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -17,6 +18,11 @@ export default function SettingsPage() {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [resetStarted, setResetStarted] = useState(false);
+  const [resetSecondsRemaining, setResetSecondsRemaining] = useState(5);
+  const [resetProgress, setResetProgress] = useState(0);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -42,6 +48,49 @@ export default function SettingsPage() {
   const update = (field: keyof UserSettings, value: string | boolean) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
     setSaved(false);
+  };
+
+  useEffect(() => {
+    if (!resetStarted || resetSecondsRemaining === 0) return;
+
+    const timer = window.setTimeout(() => {
+      setResetSecondsRemaining((seconds) => Math.max(0, seconds - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [resetStarted, resetSecondsRemaining]);
+
+  const beginReset = () => {
+    setResetStarted(true);
+    setResetSecondsRemaining(5);
+    setResetProgress(0);
+    setResetError(null);
+    window.requestAnimationFrame(() => setResetProgress(100));
+  };
+
+  const cancelReset = () => {
+    if (resetting) return;
+    setResetStarted(false);
+    setResetSecondsRemaining(5);
+    setResetProgress(0);
+    setResetError(null);
+  };
+
+  const handleReset = async () => {
+    if (!user || resetSecondsRemaining > 0) return;
+    setResetting(true);
+    setResetError(null);
+    try {
+      await resetAccountData(user.uid);
+      setSettings({ darkMode: false, preferredName: "", mainGoals: "", mainStruggles: "", customPrompt: "" });
+      setResetStarted(false);
+      setResetSecondsRemaining(5);
+      setResetProgress(0);
+    } catch (error) {
+      console.error("Failed to reset account data:", error);
+      setResetError("Your data could not be fully reset. Please try again.");
+    } finally {
+      setResetting(false);
+    }
   };
 
   if (!loaded) {
@@ -286,6 +335,82 @@ export default function SettingsPage() {
           "Save Settings"
         )}
       </button>
+
+      {/* Danger Zone */}
+      <div
+        style={{
+          marginTop: 24,
+          background: "var(--surface)",
+          borderRadius: 16,
+          border: "1px solid #dc2626",
+          padding: "22px",
+        }}
+      >
+        <div className="flex items-center gap-3" style={{ marginBottom: 6 }}>
+          <span className="material-symbols-rounded" style={{ fontSize: 22, color: "#dc2626" }}>
+            warning
+          </span>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "#dc2626", margin: 0 }}>
+            Reset account
+          </h2>
+        </div>
+        <p style={{ fontSize: 13, color: "var(--secondary)", margin: "0 0 18px" }}>
+          Permanently deletes all of your habits, completion history, buckets, goals, tasks, AI personalization, and chat histories. Your sign-in account stays active, but this cannot be undone.
+        </p>
+
+        {!resetStarted ? (
+          <button
+            onClick={beginReset}
+            style={{
+              width: "100%", padding: "13px 0", borderRadius: 12, border: "1px solid #dc2626",
+              background: "transparent", color: "#dc2626", fontSize: 14, fontWeight: 700, cursor: "pointer",
+            }}
+          >
+            Reset my account
+          </button>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#dc2626", margin: "0 0 12px" }}>
+              {resetSecondsRemaining > 0
+                ? `Please take a moment — reset unlocks in ${resetSecondsRemaining} second${resetSecondsRemaining === 1 ? "" : "s"}.`
+                : "The reset button is now unlocked. This action is permanent."}
+            </p>
+            <button
+              onClick={handleReset}
+              disabled={resetSecondsRemaining > 0 || resetting}
+              style={{
+                width: "100%", padding: "13px 0", borderRadius: 12, border: "none",
+                background: resetSecondsRemaining === 0 ? "#dc2626" : "rgba(220, 38, 38, 0.14)",
+                color: resetSecondsRemaining === 0 ? "#fff" : "#dc2626", fontSize: 14, fontWeight: 700,
+                cursor: resetSecondsRemaining > 0 || resetting ? "default" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                position: "relative", overflow: "hidden", isolation: "isolate",
+              }}
+            >
+              {resetSecondsRemaining > 0 && (
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute", inset: "0 auto 0 0", width: `${resetProgress}%`,
+                    background: "#fca5a5", transition: "width 5s linear", zIndex: 0,
+                  }}
+                />
+              )}
+              <span style={{ position: "relative", zIndex: 1 }}>
+                {resetting ? "Resetting account..." : resetSecondsRemaining > 0 ? `Reset unlocks in ${resetSecondsRemaining}s` : "Permanently reset my account"}
+              </span>
+            </button>
+            <button
+              onClick={cancelReset}
+              disabled={resetting}
+              style={{ width: "100%", marginTop: 10, border: "none", background: "transparent", color: "var(--secondary)", fontSize: 13, cursor: resetting ? "default" : "pointer" }}
+            >
+              Cancel
+            </button>
+          </>
+        )}
+        {resetError && <p role="alert" style={{ color: "#dc2626", fontSize: 13, margin: "12px 0 0" }}>{resetError}</p>}
+      </div>
 
       {/* Account Info */}
       <div

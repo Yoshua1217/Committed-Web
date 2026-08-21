@@ -22,22 +22,6 @@ const tools: ToolCard[] = [
     href: "/dashboard/ai-chat"
   },
   {
-    id: "prompt-library",
-    title: "Prompt Library",
-    description: "Save and manage reusable AI prompts.",
-    icon: "auto_awesome",
-    color: "#8B5CF6",
-    href: "/dashboard/prompt-library"
-  },
-  {
-    id: "notes",
-    title: "Notes",
-    description: "Organize your thoughts and ideas.",
-    icon: "edit_note",
-    color: "#00BCD4",
-    href: "/dashboard/notes"
-  },
-  {
     id: "breathing",
     title: "Breathing Exercises",
     description: "Calm your mind with guided breathing.",

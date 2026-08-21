@@ -22,6 +22,7 @@ import HabitCard from "@/components/habit-card";
 import ProgressCard from "@/components/progress-card";
 import CongratsPopup from "@/components/congrats-popup";
 import HabitEditModal from "@/components/habit-edit-modal";
+import HabitCompletionChart from "@/components/habit-completion-chart";
 
 const sectionHeaderStyle: React.CSSProperties = {
   fontSize: 11,
@@ -216,6 +217,12 @@ export default function HabitsPage() {
           completedNames={doneHabits.map((h) => h.name)}
         />
       </div>
+
+      {habits.length > 0 && (
+        <div style={{ marginBottom: 28 }}>
+          <HabitCompletionChart userId={user?.uid ?? ""} habits={habits} todayCompletions={completions} />
+        </div>
+      )}
 
       {/* Empty state */}
       {habits.length === 0 && (
