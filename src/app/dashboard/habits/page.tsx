@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
@@ -19,7 +19,6 @@ import { subscribeToGoals } from "@/lib/goals-service";
 import { isScheduledForDate } from "@/lib/streak-calculator";
 import HabitCard from "@/components/habit-card";
 import ProgressCard from "@/components/progress-card";
-import CongratsPopup from "@/components/congrats-popup";
 import HabitEditModal from "@/components/habit-edit-modal";
 import HabitCompletionChart from "@/components/habit-completion-chart";
 
@@ -36,6 +35,14 @@ const sectionHeaderStyle: React.CSSProperties = {
   gap: 6,
 };
 
+type CardPosition = Pick<DOMRect, "top" | "left" | "width" | "height">;
+
+interface CompletionFlight {
+  habit: Habit;
+  origin: CardPosition;
+  target: CardPosition;
+}
+
 export default function HabitsPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -46,12 +53,19 @@ export default function HabitsPage() {
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [congratsHabit, setCongratsHabit] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [draggedHabitId, setDraggedHabitId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ habitId: string; position: "before" | "after" } | null>(null);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [completingHabitId, setCompletingHabitId] = useState<string | null>(null);
+  const [justCompletedHabitId, setJustCompletedHabitId] = useState<string | null>(null);
+  const [completionFlight, setCompletionFlight] = useState<CompletionFlight | null>(null);
+  const completionTransitionTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completedEntryTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flightTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completionOrigin = useRef<CardPosition | null>(null);
+  const habitCardRefs = useRef(new Map<string, HTMLDivElement>());
 
   // Subscribe to real-time data
   useEffect(() => {
@@ -78,6 +92,12 @@ export default function HabitsPage() {
     return () => unsubs.forEach((u) => u());
   }, [user, today]);
 
+  useEffect(() => () => {
+    if (completionTransitionTimeout.current) clearTimeout(completionTransitionTimeout.current);
+    if (completedEntryTimeout.current) clearTimeout(completedEntryTimeout.current);
+    if (flightTimeout.current) clearTimeout(flightTimeout.current);
+  }, []);
+
   // Filter to today's scheduled habits
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const scheduledHabits = habits.filter((h) =>
@@ -86,25 +106,82 @@ export default function HabitsPage() {
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
 
-  const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed);
-  const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed);
+  // Keep a newly checked card in place briefly so it can animate out before
+  // React moves it into the completed group.
+  const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed || h.id === completingHabitId);
+  const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed && h.id !== completingHabitId);
+  const todayProgress = scheduledHabits.reduce((total, habit) => {
+    const completion = completionMap.get(habit.id);
+    if (habit.completionType === "counter" && habit.counterGoal > 0) {
+      return total + Math.min((completion?.counterValue ?? 0) / habit.counterGoal, 1);
+    }
+    if (habit.completionType === "timer" && habit.timerGoalSeconds > 0) {
+      return total + Math.min((completion?.timerSeconds ?? 0) / habit.timerGoalSeconds, 1);
+    }
+    return total + (completion?.completed ? 1 : 0);
+  }, 0);
 
   const handleToggleCheckbox = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
-    const result = await toggleCheckbox(habit, today, existing);
-    if (result.completed) setCongratsHabit(habit.name);
+    const isBeingCompleted = !existing?.completed;
+
+    if (isBeingCompleted) {
+      const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const pauseBeforeMove = 0;
+      if (completionTransitionTimeout.current) clearTimeout(completionTransitionTimeout.current);
+      if (completedEntryTimeout.current) clearTimeout(completedEntryTimeout.current);
+      if (flightTimeout.current) clearTimeout(flightTimeout.current);
+      const sourceCard = habitCardRefs.current.get(habit.id)?.getBoundingClientRect();
+      completionOrigin.current = sourceCard
+        ? { top: sourceCard.top, left: sourceCard.left, width: sourceCard.width, height: sourceCard.height }
+        : null;
+      setCompletingHabitId(habit.id);
+      setJustCompletedHabitId(null);
+      setCompletionFlight(null);
+      completionTransitionTimeout.current = setTimeout(() => {
+        setCompletingHabitId(null);
+        setJustCompletedHabitId(habit.id);
+        requestAnimationFrame(() => {
+          const destinationCard = habitCardRefs.current.get(habit.id)?.getBoundingClientRect();
+          const origin = completionOrigin.current;
+          if (!origin || !destinationCard || prefersReducedMotion) {
+            setJustCompletedHabitId(null);
+            return;
+          }
+          setCompletionFlight({
+            habit,
+            origin,
+            target: { top: destinationCard.top, left: destinationCard.left, width: destinationCard.width, height: destinationCard.height },
+          });
+          flightTimeout.current = setTimeout(() => {
+            setCompletionFlight(null);
+            setJustCompletedHabitId(null);
+          }, 520);
+        });
+      }, pauseBeforeMove);
+    }
+
+    try {
+      await toggleCheckbox(habit, today, existing);
+    } catch (error) {
+      if (completionTransitionTimeout.current) clearTimeout(completionTransitionTimeout.current);
+      if (completedEntryTimeout.current) clearTimeout(completedEntryTimeout.current);
+      if (flightTimeout.current) clearTimeout(flightTimeout.current);
+      setCompletingHabitId(null);
+      setJustCompletedHabitId(null);
+      setCompletionFlight(null);
+      console.error("Failed to update habit completion:", error);
+    }
   };
 
   const handleIncrementCounter = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
-    const result = await incrementCounter(habit, today, existing);
-    if (result.completed && !existing?.completed) setCongratsHabit(habit.name);
+    await incrementCounter(habit, today, existing);
   };
 
   const handleAddTimerSeconds = async (habit: Habit, seconds: number) => {
     const existing = completionMap.get(habit.id) ?? null;
-    const result = await addTimerSeconds(habit, today, existing, seconds);
-    if (result.completed && !existing?.completed) setCongratsHabit(habit.name);
+    await addTimerSeconds(habit, today, existing, seconds);
   };
 
   const handleSaveHabit = async (habit: Habit) => {
@@ -178,53 +255,40 @@ export default function HabitsPage() {
       {/* Header */}
       <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>Habits</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => router.push("/dashboard/habits/manage")}
-            style={{
-              backgroundColor: "var(--surface-variant)",
-              color: "var(--secondary)",
-              border: "none",
-              cursor: "pointer",
-              borderRadius: 14,
-              paddingTop: 10,
-              paddingBottom: 10,
-              paddingLeft: 16,
-              paddingRight: 16,
-              fontSize: 14,
-              fontWeight: 700,
-            }}
-          >
-            Manage
-          </button>
-          <button
-            onClick={() => { setEditingHabit(null); setModalOpen(true); }}
-            style={{
-              backgroundColor: "var(--primary)",
-              color: "var(--background)",
-              border: "none",
-              cursor: "pointer",
-              borderRadius: 14,
-              paddingTop: 12,
-              paddingBottom: 12,
-              paddingLeft: 20,
-              paddingRight: 20,
-              fontSize: 14,
-              fontWeight: 700,
-            }}
-          >
-            + New
-          </button>
-        </div>
+        <button
+          onClick={() => { setEditingHabit(null); setModalOpen(true); }}
+          style={{
+            backgroundColor: "var(--primary)",
+            color: "var(--background)",
+            border: "none",
+            cursor: "pointer",
+            borderRadius: 14,
+            paddingTop: 12,
+            paddingBottom: 12,
+            paddingLeft: 20,
+            paddingRight: 20,
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
+          + New
+        </button>
+      </div>
+
+      <div role="tablist" aria-label="Habit sections" className="flex items-center" style={{ width: "fit-content", padding: 4, marginBottom: 24, borderRadius: 14, backgroundColor: "var(--surface-variant)" }}>
+        <button type="button" role="tab" aria-selected onClick={() => router.push("/dashboard/habits")} style={{ padding: "9px 16px", border: "none", borderRadius: 10, backgroundColor: "var(--surface)", boxShadow: "0 1px 3px rgba(0, 0, 0, 0.12)", color: "var(--primary)", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>Overview</button>
+        {([{ id: "bucket", label: "Card" }, { id: "list", label: "List" }, { id: "history", label: "History" }] as const).map((tab) => (
+          <button key={tab.id} type="button" role="tab" aria-selected={false} onClick={() => router.push(`/dashboard/habits/manage?tab=${tab.id}`)} style={{ padding: "9px 16px", border: "none", borderRadius: 10, backgroundColor: "transparent", color: "var(--secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>{tab.label}</button>
+        ))}
       </div>
 
       <div className="habits-page-grid flex flex-col lg:flex-row gap-8" style={{ alignItems: "flex-start" }}>
         <div className="flex-1 min-w-0">
           <div style={{ marginBottom: 24 }}>
-            <ProgressCard totalScheduled={scheduledHabits.length} completedCount={doneHabits.length} completedNames={doneHabits.map((h) => h.name)} />
+            <ProgressCard totalScheduled={scheduledHabits.length} progressValue={todayProgress} completedNames={doneHabits.map((h) => h.name)} />
           </div>
           {habits.length > 0 ? (
-            <HabitCompletionChart userId={user?.uid ?? ""} habits={habits} todayCompletions={completions} />
+            <HabitCompletionChart userId={user?.uid ?? ""} habits={habits} todayCompletions={completions} animateTodayChange />
           ) : (
             <div className="text-center" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)", borderRadius: 20, padding: 48 }}>
               <p style={{ fontSize: 14, fontWeight: 500, color: "var(--primary)", margin: "0 0 4px" }}>No habits yet</p>
@@ -243,8 +307,8 @@ export default function HabitsPage() {
               <h3 style={sectionHeaderStyle}>To Do ({todoHabits.length})</h3>
               <div className="flex flex-col" style={{ gap: 8 }}>
                 {todoHabits.map((habit) => (
-                  <div key={habit.id} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
-                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed={false} />
+                  <div key={habit.id} ref={(element) => { if (element) habitCardRefs.current.set(habit.id, element); else habitCardRefs.current.delete(habit.id); }} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
+                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed={habit.id === completingHabitId} completionAnimation={habit.id === completingHabitId ? "confirming" : undefined} />
                   </div>
                 ))}
               </div>
@@ -258,7 +322,7 @@ export default function HabitsPage() {
               </h3>
               <div className="flex flex-col" style={{ gap: 8 }}>
                 {doneHabits.map((habit) => (
-                  <div key={habit.id} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
+                  <div key={habit.id} ref={(element) => { if (element) habitCardRefs.current.set(habit.id, element); else habitCardRefs.current.delete(habit.id); }} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} className={habit.id === justCompletedHabitId ? "habit-card-flight-target" : undefined} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
                     <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed />
                   </div>
                 ))}
@@ -275,9 +339,6 @@ export default function HabitsPage() {
         </aside>
       </div>
 
-      {/* Congrats popup */}
-      <CongratsPopup habitName={congratsHabit} onDismiss={() => setCongratsHabit(null)} />
-
       {/* Edit/Create Modal */}
       <HabitEditModal
         isOpen={modalOpen}
@@ -290,6 +351,22 @@ export default function HabitsPage() {
         userId={user?.uid ?? ""}
         nextSortOrder={habits.length}
       />
+
+      {completionFlight && (
+        <div
+          className="habit-card-flight"
+          style={{
+            left: completionFlight.origin.left,
+            top: completionFlight.origin.top,
+            width: completionFlight.origin.width,
+            height: completionFlight.origin.height,
+            "--flight-x": `${completionFlight.target.left - completionFlight.origin.left}px`,
+            "--flight-y": `${completionFlight.target.top - completionFlight.origin.top}px`,
+          } as React.CSSProperties}
+        >
+          <HabitCard habit={completionFlight.habit} completion={completionMap.get(completionFlight.habit.id) ?? null} bucket={bucketMap.get(completionFlight.habit.bucketId) ?? null} goal={goalMap.get(completionFlight.habit.goalId) ?? null} streak={null} onToggleCheckbox={() => {}} onIncrementCounter={() => {}} onAddTimerSeconds={() => {}} completed completionAnimation="confirming" />
+        </div>
+      )}
     </div>
   );
 }

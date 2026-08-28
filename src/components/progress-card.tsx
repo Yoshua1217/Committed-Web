@@ -4,7 +4,7 @@ import { getProgressColor } from "@/lib/progress-color";
 
 interface ProgressCardProps {
   totalScheduled: number;
-  completedCount: number;
+  progressValue: number;
   completedNames: string[];
 }
 
@@ -13,7 +13,7 @@ const monthNames = ["January", "February", "March", "April", "May", "June", "Jul
 
 export default function ProgressCard({
   totalScheduled,
-  completedCount,
+  progressValue,
   completedNames,
 }: ProgressCardProps) {
   const now = new Date();
@@ -42,9 +42,10 @@ export default function ProgressCard({
     );
   }
 
-  const pct = Math.round((completedCount / totalScheduled) * 100);
+  const pct = Math.round((progressValue / totalScheduled) * 100);
   const allDone = pct >= 100;
   const progressColor = getProgressColor(pct);
+  const formattedProgress = Number.isInteger(progressValue) ? progressValue : progressValue.toFixed(1);
 
   return (
     <div
@@ -75,7 +76,7 @@ export default function ProgressCard({
           {pct}%
         </span>
         <span style={{ fontSize: 13, color: "var(--secondary)" }}>
-          {completedCount} of {totalScheduled} completed
+          {formattedProgress} of {totalScheduled} completed
         </span>
       </div>
 

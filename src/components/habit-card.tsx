@@ -18,6 +18,7 @@ interface HabitCardProps {
   onIncrementCounter: () => void;
   onAddTimerSeconds: (seconds: number) => void;
   completed: boolean;
+  completionAnimation?: "confirming" | "settled";
 }
 
 function formatTimer(seconds: number): string {
@@ -44,6 +45,7 @@ export default function HabitCard({
   onIncrementCounter,
   onAddTimerSeconds,
   completed,
+  completionAnimation,
 }: HabitCardProps) {
   const bucketColor = bucket ? argbToHex(bucket.color) : "var(--accent)";
   const displayIcon = goal?.iconName || bucket?.iconName || "Category";
@@ -67,7 +69,7 @@ export default function HabitCard({
         border: "1px solid var(--border)",
         borderRadius: 16,
         padding: "14px 16px",
-        opacity: completed ? 0.55 : 1,
+        opacity: completionAnimation === "confirming" ? 1 : completed ? 0.55 : 1,
         transition: "opacity 0.2s ease",
       }}
     >
@@ -91,12 +93,13 @@ export default function HabitCard({
               fontSize: 14,
               fontWeight: 600,
               color: "var(--primary)",
-              textDecoration: completed ? "line-through" : "none",
+              textDecoration: completed && completionAnimation !== "confirming" ? "line-through" : "none",
               margin: 0,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
             }}
+            className={completionAnimation === "confirming" ? "habit-name-completing" : undefined}
           >
             {habit.name}
           </p>
@@ -121,7 +124,7 @@ export default function HabitCard({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onToggleCheckbox(); }}
-            className="shrink-0 flex items-center justify-center rounded-full"
+            className={`shrink-0 flex items-center justify-center rounded-full${completionAnimation === "confirming" ? " habit-checkbox-completing" : ""}`}
             style={{
               width: 36,
               height: 36,
@@ -134,7 +137,7 @@ export default function HabitCard({
           >
             {completed && (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#FFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
+                <polyline className={completionAnimation === "confirming" ? "habit-check-draw" : undefined} pathLength="1" points="20 6 9 17 4 12" />
               </svg>
             )}
           </button>

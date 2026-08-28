@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type DragEvent } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { Bucket } from "@/lib/types";
 import { subscribeToBuckets, saveBucket, deleteBucket } from "@/lib/buckets-service";
@@ -19,6 +19,9 @@ export default function BucketsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingBucket, setEditingBucket] = useState<Bucket | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [draggedBucketId, setDraggedBucketId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; position: "before" | "after" } | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   // Real-time Firestore listener
   useEffect(() => {
@@ -56,6 +59,44 @@ export default function BucketsPage() {
   const openEdit = (bucket: Bucket) => {
     setEditingBucket(bucket);
     setModalOpen(true);
+  };
+
+  const handleBucketDrop = async (targetBucketId: string, event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const sourceBucketId = draggedBucketId;
+    setDraggedBucketId(null);
+    setDropTarget(null);
+    if (!sourceBucketId || sourceBucketId === targetBucketId || savingOrder) return;
+
+    const reordered = [...buckets];
+    const sourceIndex = reordered.findIndex((bucket) => bucket.id === sourceBucketId);
+    if (sourceIndex < 0 || !reordered.some((bucket) => bucket.id === targetBucketId)) return;
+    const [movedBucket] = reordered.splice(sourceIndex, 1);
+    const targetIndex = reordered.findIndex((bucket) => bucket.id === targetBucketId);
+    const bounds = event.currentTarget.getBoundingClientRect();
+    reordered.splice(targetIndex + (event.clientY > bounds.top + bounds.height / 2 ? 1 : 0), 0, movedBucket);
+
+    const savedOrder = reordered.map((bucket, index) => ({ ...bucket, sortOrder: index }));
+    setBuckets(savedOrder);
+    setSavingOrder(true);
+    try {
+      await Promise.all(savedOrder.map((bucket) => saveBucket(bucket)));
+    } catch (error) {
+      console.error("Failed to save bucket order:", error);
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  const handleBucketDragOver = (bucketId: string, event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    if (!draggedBucketId || draggedBucketId === bucketId) {
+      setDropTarget(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setDropTarget({ id: bucketId, position: event.clientY < bounds.top + bounds.height / 2 ? "before" : "after" });
   };
 
   if (loading) {
@@ -176,14 +217,21 @@ export default function BucketsPage() {
             return (
               <div
                 key={bucket.id}
+                draggable={!savingOrder}
+                onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedBucketId(bucket.id); }}
+                onDragOver={(event) => handleBucketDragOver(bucket.id, event)}
+                onDragEnd={() => { setDraggedBucketId(null); setDropTarget(null); }}
+                onDrop={(event) => void handleBucketDrop(bucket.id, event)}
                 onClick={() => openEdit(bucket)}
                 style={{
                   backgroundColor: "var(--surface)",
                   border: "1px solid var(--border)",
                   borderRadius: 20,
                   padding: 20,
-                  cursor: "pointer",
-                  transition: "border-color 0.15s",
+                  cursor: savingOrder ? "default" : "grab",
+                  opacity: draggedBucketId === bucket.id ? 0.45 : 1,
+                  boxShadow: dropTarget?.id === bucket.id ? dropTarget.position === "before" ? "0 -4px 0 #28b66f" : "0 4px 0 #28b66f" : "none",
+                  transition: "border-color 0.15s, opacity 0.15s, box-shadow 0.12s",
                 }}
               >
                 <div className="flex items-center" style={{ gap: 14 }}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Habit, HabitCompletion } from "@/lib/types";
 import { getCompletionsForUser } from "@/lib/habits-service";
 import { isScheduledForDate } from "@/lib/streak-calculator";
@@ -41,11 +41,25 @@ function formatDate(date: string, range: Range) {
   }).format(parsed);
 }
 
-export default function HabitCompletionChart({ userId, habits, todayCompletions }: { userId: string; habits: Habit[]; todayCompletions: HabitCompletion[] }) {
+export default function HabitCompletionChart({
+  userId,
+  habits,
+  todayCompletions,
+  animateTodayChange = false,
+}: {
+  userId: string;
+  habits: Habit[];
+  todayCompletions: HabitCompletion[];
+  /** Enables the progress-line motion for check/uncheck actions on the Habits page. */
+  animateTodayChange?: boolean;
+}) {
   const [range, setRange] = useState<Range>("week");
   const [history, setHistory] = useState<HabitCompletion[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [displayedPoints, setDisplayedPoints] = useState<ChartPoint[]>([]);
+  const previousPointsRef = useRef<ChartPoint[]>([]);
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -84,11 +98,54 @@ export default function HabitCompletionChart({ userId, habits, todayCompletions 
     });
   }, [habits, history, range, todayCompletions]);
 
+  // Only the live value for today is animated. History loads and range changes
+  // update immediately so the graph never replays when the page is opened.
+  useEffect(() => {
+    const previousPoints = previousPointsRef.current;
+    const sameDates = previousPoints.length === points.length
+      && previousPoints.every((point, index) => point.date === points[index]?.date);
+    const todayIndex = points.length - 1;
+    const todayChanged = sameDates
+      && todayIndex >= 0
+      && previousPoints[todayIndex].value !== points[todayIndex].value;
+    const changedOnlyToday = sameDates
+      && previousPoints.every((point, index) => index === todayIndex || point.value === points[index].value);
+    const reducedMotion = typeof window !== "undefined"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current);
+    previousPointsRef.current = points;
+
+    if (!animateTodayChange || !todayChanged || !changedOnlyToday || reducedMotion) {
+      animationFrameRef.current = requestAnimationFrame(() => setDisplayedPoints(points));
+    } else {
+      const start = performance.now();
+      const duration = 360;
+      const animate = (now: number) => {
+        const progress = Math.min((now - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        setDisplayedPoints(points.map((point, index) => (
+          index === todayIndex
+            ? { ...point, value: previousPoints[index].value + (point.value - previousPoints[index].value) * eased }
+            : point
+        )));
+        if (progress < 1) animationFrameRef.current = requestAnimationFrame(animate);
+      };
+
+      animationFrameRef.current = requestAnimationFrame(animate);
+    }
+    return () => {
+      if (animationFrameRef.current !== null) cancelAnimationFrame(animationFrameRef.current);
+    };
+  }, [animateTodayChange, points]);
+
+  const chartPoints = displayedPoints.length === points.length ? displayedPoints : points;
+
   const plotWidth = chartWidth - padding.left - padding.right;
   const plotHeight = chartHeight - padding.top - padding.bottom;
-  const xFor = (index: number) => padding.left + (points.length === 1 ? 0 : (index / (points.length - 1)) * plotWidth);
+  const xFor = (index: number) => padding.left + (chartPoints.length === 1 ? 0 : (index / (chartPoints.length - 1)) * plotWidth);
   const yFor = (value: number) => padding.top + ((100 - value) / 100) * plotHeight;
-  const linePath = points.map((point, index) => `${index === 0 ? "M" : "L"} ${xFor(index).toFixed(2)} ${yFor(point.value).toFixed(2)}`).join(" ");
+  const linePath = chartPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${xFor(index).toFixed(2)} ${yFor(point.value).toFixed(2)}`).join(" ");
   const hovered = hoveredIndex === null ? null : points[hoveredIndex];
 
   const onPointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -118,13 +175,13 @@ export default function HabitCompletionChart({ userId, habits, todayCompletions 
           <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Daily habit completion percentage" onPointerMove={onPointerMove} onPointerLeave={() => setHoveredIndex(null)} style={{ display: "block", width: "100%", height: "auto", minHeight: 210, cursor: "crosshair", overflow: "visible" }}>
             <defs>
               <linearGradient id="habit-line-gradient" x1="0" y1="0" x2="1" y2="0">
-                {points.map((point, index) => <stop key={point.date} offset={`${(index / Math.max(points.length - 1, 1)) * 100}%`} stopColor={colorFor(point.value)} />)}
+                {chartPoints.map((point, index) => <stop key={point.date} offset={`${(index / Math.max(chartPoints.length - 1, 1)) * 100}%`} stopColor={colorFor(point.value)} />)}
               </linearGradient>
             </defs>
             {[0, 25, 50, 75, 100].map((value) => <g key={value}><line x1={padding.left} x2={chartWidth - padding.right} y1={yFor(value)} y2={yFor(value)} stroke="var(--border)" strokeWidth="1" strokeDasharray={value === 0 ? "0" : "3 5"} /><text x={padding.left - 8} y={yFor(value) + 4} textAnchor="end" fill="var(--secondary)" fontSize="10" fontWeight="600">{value}%</text></g>)}
             <path d={linePath} fill="none" stroke="url(#habit-line-gradient)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-            {hoveredIndex !== null && <><line x1={xFor(hoveredIndex)} x2={xFor(hoveredIndex)} y1={padding.top} y2={padding.top + plotHeight} stroke="var(--secondary)" opacity="0.3" strokeDasharray="3 4" /><circle cx={xFor(hoveredIndex)} cy={yFor(points[hoveredIndex].value)} r="6" fill="var(--surface)" stroke={colorFor(points[hoveredIndex].value)} strokeWidth="3" /></>}
-            {[0, Math.floor((points.length - 1) / 2), points.length - 1].map((index) => <text key={index} x={xFor(index)} y={chartHeight - 10} textAnchor={index === 0 ? "start" : index === points.length - 1 ? "end" : "middle"} fill="var(--secondary)" fontSize="10" fontWeight="600">{points[index].label}</text>)}
+            {hoveredIndex !== null && <><line x1={xFor(hoveredIndex)} x2={xFor(hoveredIndex)} y1={padding.top} y2={padding.top + plotHeight} stroke="var(--secondary)" opacity="0.3" strokeDasharray="3 4" /><circle cx={xFor(hoveredIndex)} cy={yFor(chartPoints[hoveredIndex].value)} r="6" fill="var(--surface)" stroke={colorFor(chartPoints[hoveredIndex].value)} strokeWidth="3" /></>}
+            {[0, Math.floor((chartPoints.length - 1) / 2), chartPoints.length - 1].map((index) => <text key={index} x={xFor(index)} y={chartHeight - 10} textAnchor={index === 0 ? "start" : index === chartPoints.length - 1 ? "end" : "middle"} fill="var(--secondary)" fontSize="10" fontWeight="600">{chartPoints[index].label}</text>)}
           </svg>
           {hovered && <div style={{ position: "absolute", left: `${(xFor(hoveredIndex!) / chartWidth) * 100}%`, top: Math.max(2, (yFor(hovered.value) / chartHeight) * 100 - 22) + "%", transform: "translate(-50%, -100%)", pointerEvents: "none", whiteSpace: "nowrap", zIndex: 1, background: "var(--primary)", color: "var(--background)", padding: "7px 9px", borderRadius: 9, fontSize: 11, fontWeight: 700, boxShadow: "0 6px 18px rgba(0,0,0,0.18)" }}><span style={{ opacity: 0.7, fontWeight: 600 }}>{hovered.label}</span><span style={{ marginLeft: 7 }}>{hovered.value}%</span></div>}
         </div>
