@@ -8,8 +8,11 @@ import {
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
+  signInWithCredential,
   signInWithPopup,
 } from "firebase/auth";
+import { Capacitor } from "@capacitor/core";
+import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import { auth } from "./firebase";
 
 interface AuthContextType {
@@ -44,6 +47,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
+    if (Capacitor.isNativePlatform()) {
+      const result = await FirebaseAuthentication.signInWithGoogle({
+        skipNativeAuth: true,
+        useCredentialManager: true,
+      });
+      const idToken = result.credential?.idToken;
+      if (!idToken) {
+        throw new Error("Google sign-in did not return an ID token.");
+      }
+      await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+      return;
+    }
+
     const provider = new GoogleAuthProvider();
     await signInWithPopup(auth, provider);
   };

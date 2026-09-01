@@ -1,0 +1,464 @@
+[
+  {
+    "id": "dumbbell-bench-press",
+    "name": "Dumbbell Bench Press",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Chest"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Triceps"
+    ],
+    "summary": "Builds chest size and pressing strength while demanding more stabilization than a barbell press.",
+    "instructions": "Lie on a flat bench with a dumbbell in each hand and your feet planted firmly on the floor. Lower the dumbbells under control beside your chest until you reach a comfortable stretch, then press them upward while keeping your shoulder blades stable and wrists stacked over your elbows.",
+    "restSeconds": 120
+  },
+  {
+    "id": "incline-dumbbell-press",
+    "name": "Incline Dumbbell Press",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Chest"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Triceps"
+    ],
+    "summary": "Builds upper-chest size and pressing strength while retaining the range of motion and independent-arm loading of dumbbells.",
+    "instructions": "Set the bench to a moderate 20–40 degree incline and begin with the dumbbells above your upper chest. Lower them under control until you feel a comfortable chest stretch, then press upward without letting your shoulders roll forward.",
+    "restSeconds": 120
+  },
+  {
+    "id": "machine-chest-press",
+    "name": "Machine Chest Press",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Chest"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Triceps"
+    ],
+    "summary": "Builds chest size with high stability, making it easier to push the target muscles close to fatigue.",
+    "instructions": "Adjust the seat so the handles sit around mid-chest level and keep your back firmly against the pad. Press the handles forward until your arms are nearly straight, then return them slowly until you feel a comfortable stretch across your chest.",
+    "restSeconds": 90
+  },
+  {
+    "id": "cable-fly",
+    "name": "Cable Fly",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Chest"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders"
+    ],
+    "summary": "Isolates the chest through a wide range of motion while maintaining consistent cable tension.",
+    "instructions": "Stand between two cable handles with a slight bend in your elbows and your chest tall. Bring your arms inward in a hugging motion, then slowly allow them to open again until you feel a controlled stretch in your chest.",
+    "restSeconds": 90
+  },
+  {
+    "id": "seated-dumbbell-shoulder-press",
+    "name": "Seated Dumbbell Shoulder Press",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Shoulders"
+    ],
+    "secondaryMuscleGroups": [
+      "Triceps",
+      "Chest"
+    ],
+    "summary": "Builds shoulder size and overhead pressing strength while allowing each arm to move independently.",
+    "instructions": "Sit against an upright or slightly reclined bench with the dumbbells around shoulder height. Press them overhead until your arms are nearly straight, then lower them under control to a comfortable depth around shoulder level.",
+    "restSeconds": 120
+  },
+  {
+    "id": "machine-shoulder-press",
+    "name": "Machine Shoulder Press",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Shoulders"
+    ],
+    "secondaryMuscleGroups": [
+      "Triceps"
+    ],
+    "summary": "Builds the shoulders with less stabilization demand, allowing controlled and consistent pressing volume.",
+    "instructions": "Adjust the seat so the handles begin around shoulder height and keep your back against the pad. Press overhead through the machine’s natural path, then lower slowly without letting the weight stack slam down.",
+    "restSeconds": 90
+  },
+  {
+    "id": "dumbbell-lateral-raise",
+    "name": "Dumbbell Lateral Raise",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Shoulders"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds shoulder width by directly targeting the side delts.",
+    "instructions": "Hold light dumbbells at your sides with a slight bend in your elbows. Raise your arms outward to roughly shoulder height, then lower them slowly while avoiding excessive swinging or shrugging.",
+    "restSeconds": 90
+  },
+  {
+    "id": "one-and-a-quarter-rep-dumbbell-lateral-raise",
+    "name": "1¼-Rep Dumbbell Lateral Raise",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Shoulders"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Increases side-delt time under tension and creates a strong hypertrophy stimulus with relatively light weight.",
+    "instructions": "Raise the dumbbells to about shoulder height, lower them roughly one-quarter of the way, raise them back to the top, then lower them completely. That full sequence counts as one rep, so use lighter weight than for normal lateral raises.",
+    "restSeconds": 90
+  },
+  {
+    "id": "reverse-pec-deck",
+    "name": "Reverse Pec Deck",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Shoulders"
+    ],
+    "secondaryMuscleGroups": [
+      "Back"
+    ],
+    "summary": "Builds the rear delts and upper back while helping balance a pressing-heavy upper-body program.",
+    "instructions": "Sit facing the machine with your chest against the pad and hold the handles with your arms extended in front of you. Move your arms outward and backward while keeping your elbows slightly bent, then return slowly to the starting position.",
+    "restSeconds": 90
+  },
+  {
+    "id": "cable-triceps-pressdown",
+    "name": "Cable Triceps Pressdown",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Triceps"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds triceps size through a stable movement that is easy to control and progressively overload.",
+    "instructions": "Stand facing the cable with your upper arms close to your torso and your elbows bent. Extend your elbows until your arms are straight, squeeze briefly, then let the handle rise under control without allowing your elbows to drift far forward.",
+    "restSeconds": 90
+  },
+  {
+    "id": "overhead-cable-triceps-extension",
+    "name": "Overhead Cable Triceps Extension",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Triceps"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds the triceps through a lengthened position, emphasizing the long head.",
+    "instructions": "Face away from the cable with the attachment behind your head and your upper arms angled overhead. Extend your elbows until your arms straighten, then slowly return the attachment behind your head while keeping your upper arms relatively still.",
+    "restSeconds": 90
+  },
+  {
+    "id": "pull-up",
+    "name": "Pull-Up",
+    "loadType": "bodyweight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Biceps",
+      "Core",
+      "Forearms"
+    ],
+    "summary": "Builds vertical-pulling strength and develops the lats, upper back, and arms using bodyweight resistance.",
+    "instructions": "Hang from the bar with your arms extended and torso braced. Pull yourself upward by driving your elbows down toward your sides, then lower under control until your arms are fully extended again.",
+    "restSeconds": 120
+  },
+  {
+    "id": "assisted-pull-up",
+    "name": "Assisted Pull-Up",
+    "loadType": "assistance",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Biceps",
+      "Forearms"
+    ],
+    "summary": "Builds pull-up strength while allowing high-quality reps with less than full bodyweight resistance.",
+    "instructions": "Set the assistance machine or band to provide enough support for controlled reps. Perform the same motion as a normal pull-up, driving your elbows downward and lowering yourself to a full stretch between repetitions.",
+    "restSeconds": 120
+  },
+  {
+    "id": "weighted-pull-up",
+    "name": "Weighted Pull-Up",
+    "loadType": "added_weight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Biceps",
+      "Forearms"
+    ],
+    "summary": "Builds advanced vertical-pulling strength by progressively loading the pull-up beyond bodyweight.",
+    "instructions": "Secure additional resistance using a dip belt or another stable method and begin from a controlled hang. Pull yourself upward through your normal range of motion, then lower under control without shortening the movement to accommodate the extra weight.",
+    "restSeconds": 120
+  },
+  {
+    "id": "chest-supported-row",
+    "name": "Chest-Supported Row",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Biceps",
+      "Forearms"
+    ],
+    "summary": "Builds back thickness while minimizing lower-back fatigue and reducing the ability to use momentum.",
+    "instructions": "Lie chest-down against an incline bench or chest-supported row machine and hold the weights with your arms extended. Pull toward your torso while keeping your chest against the pad, then lower slowly until your upper back reaches a controlled stretch.",
+    "restSeconds": 90
+  },
+  {
+    "id": "lat-pulldown",
+    "name": "Lat Pulldown",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Biceps",
+      "Forearms"
+    ],
+    "summary": "Builds lat size and vertical-pulling strength through a stable movement that is easy to progressively overload.",
+    "instructions": "Secure your thighs beneath the pad and grip the bar or handles overhead. Pull downward toward your upper chest by driving your elbows toward your sides, then allow your arms to extend overhead again under control.",
+    "restSeconds": 90
+  },
+  {
+    "id": "seated-cable-row",
+    "name": "Seated Cable Row",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Biceps",
+      "Forearms"
+    ],
+    "summary": "Builds back thickness with continuous cable tension and a controlled stretch at the front of each rep.",
+    "instructions": "Sit tall with your feet braced and hold the handle with your arms extended. Pull the handle toward your torso by driving your elbows backward, then slowly extend your arms and allow a modest forward reach without excessive torso swinging.",
+    "restSeconds": 90
+  },
+  {
+    "id": "one-arm-lat-focused-row",
+    "name": "One-Arm Lat-Focused Row",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Biceps",
+      "Shoulders"
+    ],
+    "summary": "Builds lat size one side at a time while emphasizing a long range of motion and strong stretch.",
+    "instructions": "Support yourself securely and let the working arm reach forward or downward into a stretch. Pull your elbow toward your hip rather than flaring it high, then slowly return to the stretched starting position.",
+    "restSeconds": 90
+  },
+  {
+    "id": "machine-row",
+    "name": "Machine Row",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Back"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Biceps",
+      "Forearms"
+    ],
+    "summary": "Builds back size with high stability, making it easier to focus on the target muscles and train close to fatigue.",
+    "instructions": "Adjust the machine so the handles can be reached comfortably while maintaining your supported position. Pull the handles toward your torso, then return them slowly until your back reaches a comfortable stretch.",
+    "restSeconds": 90
+  },
+  {
+    "id": "dumbbell-curl",
+    "name": "Dumbbell Curl",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Biceps"
+    ],
+    "secondaryMuscleGroups": [
+      "Forearms"
+    ],
+    "summary": "Builds biceps size and elbow-flexion strength while allowing each arm to work independently.",
+    "instructions": "Hold the dumbbells by your sides with your elbows close to your torso. Curl them upward while rotating your palms upward if comfortable, then lower them slowly without swinging your body.",
+    "restSeconds": 90
+  },
+  {
+    "id": "ez-bar-curl",
+    "name": "EZ-Bar Curl",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Biceps"
+    ],
+    "secondaryMuscleGroups": [
+      "Forearms"
+    ],
+    "summary": "Builds biceps size and strength while allowing heavier bilateral loading with a wrist-friendly angled grip.",
+    "instructions": "Hold the EZ bar with an underhand grip and keep your elbows near your sides. Curl the bar toward your upper torso, then lower it under control without using your hips or lower back to create momentum.",
+    "restSeconds": 90
+  },
+  {
+    "id": "hammer-curl",
+    "name": "Hammer Curl",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Biceps",
+      "Forearms"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds upper-arm thickness and forearm strength through a neutral-grip curl.",
+    "instructions": "Hold the dumbbells with your palms facing inward and your elbows close to your sides. Curl upward without rotating your wrists, then lower slowly until your arms are nearly straight.",
+    "restSeconds": 90
+  },
+  {
+    "id": "facing-away-dual-cable-curl",
+    "name": "Facing-Away Dual-Cable Curl",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Biceps"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds the biceps through heavy tension in a lengthened position and a strong stretch-focused stimulus.",
+    "instructions": "Stand facing away from two low cable pulleys with one handle in each hand and your arms extended slightly behind your torso. Curl the handles upward while keeping your elbows from drifting far forward, then slowly return to the stretched starting position.",
+    "restSeconds": 90
+  },
+  {
+    "id": "preacher-curl",
+    "name": "Preacher Curl",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Biceps"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds the biceps through strict elbow flexion while limiting momentum and shoulder movement.",
+    "instructions": "Rest your upper arms firmly against the preacher pad and begin with your elbows close to extended. Curl the weight upward while keeping your arms against the pad, then lower slowly without forcefully locking your elbows at the bottom.",
+    "restSeconds": 90
+  },
+  {
+    "id": "box-jump",
+    "name": "Box Jump",
+    "loadType": "bodyweight",
+    "primaryMuscleGroups": [
+      "Glutes",
+      "Quadriceps"
+    ],
+    "secondaryMuscleGroups": [
+      "Hamstrings",
+      "Calves",
+      "Core"
+    ],
+    "summary": "Develops explosive lower-body power and rapid force production with a controlled landing surface.",
+    "instructions": "Start in an athletic stance, dip quickly through the hips and knees, swing your arms, and jump explosively onto a stable box. Land softly with both feet fully supported, stand upright, then step down before resetting.",
+    "restSeconds": 90
+  },
+  {
+    "id": "broad-jump",
+    "name": "Broad Jump",
+    "loadType": "bodyweight",
+    "primaryMuscleGroups": [
+      "Glutes",
+      "Hamstrings",
+      "Quadriceps"
+    ],
+    "secondaryMuscleGroups": [
+      "Calves",
+      "Core"
+    ],
+    "summary": "Develops horizontal explosiveness and powerful hip extension.",
+    "instructions": "Begin in an athletic stance, push your hips back, and swing your arms behind you. Explosively jump forward as far as you can while maintaining control, then land softly on both feet and fully reset before the next rep.",
+    "restSeconds": 90
+  },
+  {
+    "id": "pogo-jump",
+    "name": "Pogo Jump",
+    "loadType": "bodyweight",
+    "primaryMuscleGroups": [
+      "Calves"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Develops reactive strength, ankle stiffness, and efficient elastic energy return for jumping and running.",
+    "instructions": "Keep your body relatively tall and perform quick, repeated jumps primarily through the ankles with minimal bending at the knees and hips. Focus on short ground-contact times and springy rebounds rather than trying to jump as high as possible.",
+    "restSeconds": 90
+  },
+  {
+    "id": "bulgarian-split-squat",
+    "name": "Bulgarian Split Squat",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Quadriceps",
+      "Glutes"
+    ],
+    "secondaryMuscleGroups": [
+      "Hamstrings",
+      "Core"
+    ],
+    "summary": "Builds unilateral leg strength, balance, and stability while training each leg independently.",
+    "instructions": "Stand a stride in front of a bench and place your rear foot on the bench behind you. Lower your body by bending the front knee and hip while keeping most of your weight on the front leg, then drive through the front foot to return to standing.",
+    "restSeconds": 120
+  },
+  {
+    "id": "romanian-deadlift",
+    "name": "Romanian Deadlift",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Hamstrings",
+      "Glutes"
+    ],
+    "secondaryMuscleGroups": [
+      "Back",
+      "Forearms"
+    ],
+    "summary": "Builds posterior-chain strength while training the hamstrings through a long, loaded range of motion.",
+    "instructions": "Stand with the weight close to your thighs and keep a slight bend in your knees. Push your hips backward while keeping the weight close to your legs until you feel a strong hamstring stretch, then drive your hips forward to return to standing.",
+    "restSeconds": 120
+  },
+  {
+    "id": "leg-extension",
+    "name": "Leg Extension",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Quadriceps"
+    ],
+    "secondaryMuscleGroups": [],
+    "summary": "Builds quadriceps strength and size through direct knee-extension training with minimal fatigue to the rest of the body.",
+    "instructions": "Adjust the machine so your knees line up with its pivot point and the pad rests above your ankles. Extend your knees until your legs are nearly straight, squeeze the quadriceps briefly, then lower the weight under control.",
+    "restSeconds": 90
+  },
+  {
+    "id": "front-squat",
+    "name": "Front Squat",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Quadriceps"
+    ],
+    "secondaryMuscleGroups": [
+      "Glutes",
+      "Back",
+      "Core"
+    ],
+    "summary": "Builds lower-body strength with a strong quadriceps emphasis while demanding an upright torso and core stability.",
+    "instructions": "Rest the bar across the front of your shoulders using a front-rack or crossed-arm grip and keep your elbows high. Brace your core, squat down while keeping your torso upright and knees tracking with your toes, then drive through your feet to stand back up.",
+    "restSeconds": 120
+  },
+  {
+    "id": "back-squat",
+    "name": "Back Squat",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Quadriceps",
+      "Glutes"
+    ],
+    "secondaryMuscleGroups": [
+      "Hamstrings",
+      "Back",
+      "Core"
+    ],
+    "summary": "Builds broad lower-body strength by allowing heavy loading across the hips, knees, and trunk.",
+    "instructions": "Position the bar securely across your upper back, brace your torso, and keep your feet planted slightly wider than hip width. Sit down and slightly back while allowing your knees to track over your toes, descend to a comfortable depth, then drive through your feet to return to standing.",
+    "restSeconds": 120
+  }
+]

@@ -12,7 +12,7 @@ function argbToHex(argb: number): string {
   return "#" + rgb.toString(16).padStart(6, "0").toUpperCase();
 }
 
-export default function BucketsPage() {
+export default function BucketsPage({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,8 +101,9 @@ export default function BucketsPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 32 }}>
+      <div style={{ padding: embedded ? 0 : 32 }}>
         <h1
+          id="buckets-heading"
           style={{
             fontSize: 24,
             fontWeight: 700,
@@ -128,10 +129,11 @@ export default function BucketsPage() {
   }
 
   return (
-    <div style={{ padding: 32 }}>
+    <div style={{ padding: embedded ? 0 : 32 }}>
       {/* Header */}
       <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <h1
+          id="buckets-heading"
           style={{
             fontSize: 24,
             fontWeight: 700,

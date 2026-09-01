@@ -39,3 +39,6 @@ report.*.json
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Android Studio SDK path (machine-specific)
+android/local.properties

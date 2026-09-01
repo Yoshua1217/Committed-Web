@@ -15,11 +15,19 @@ interface ToolCard {
 const tools: ToolCard[] = [
   {
     id: "ai-chat",
-    title: "AI Chat Proxy",
-    description: "Secure proxy to communicate with OpenRouter.",
+    title: "AI Chat",
+    description: "Get coaching and ideas for your habits and routine.",
     icon: "forum",
     color: "#EC4899",
     href: "/dashboard/ai-chat"
+  },
+  {
+    id: "tasks",
+    title: "Tasks",
+    description: "Capture to-dos and keep your work moving.",
+    icon: "assignment",
+    color: "#3B82F6",
+    href: "/dashboard/tasks"
   },
   {
     id: "breathing",

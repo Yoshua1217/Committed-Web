@@ -239,10 +239,6 @@ export default function ManageHabitsPage() {
   useEffect(() => {
     if (!draggedBucketId) return;
 
-    const handleWheelWhileDragging = (event: WheelEvent) => {
-      event.preventDefault();
-      window.scrollBy({ top: event.deltaY, left: event.deltaX });
-    };
     const autoScrollNearViewportEdge = (event: DragEvent) => {
       const edgeSize = 88;
       const maxStep = 22;
@@ -253,10 +249,8 @@ export default function ManageHabitsPage() {
       }
     };
 
-    window.addEventListener("wheel", handleWheelWhileDragging, { passive: false });
     window.addEventListener("dragover", autoScrollNearViewportEdge);
     return () => {
-      window.removeEventListener("wheel", handleWheelWhileDragging);
       window.removeEventListener("dragover", autoScrollNearViewportEdge);
     };
   }, [draggedBucketId]);

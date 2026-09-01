@@ -312,7 +312,7 @@ export default function AiChatPage() {
 
   return (
     <div
-      className="flex flex-col"
+      className="ai-chat-page flex flex-col"
       style={{ height: "calc(100vh - 0px)", maxHeight: "100vh" }}
     >
       {/* Header */}
@@ -325,7 +325,7 @@ export default function AiChatPage() {
         }}
       >
         {/* Top row: title + actions */}
-        <div className="flex items-center justify-between">
+        <div className="ai-chat-toolbar flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 style={{ fontSize: 18, fontWeight: 700, color: "var(--primary)", margin: 0 }}>
               AI Chat
@@ -343,7 +343,7 @@ export default function AiChatPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="ai-chat-actions flex items-center gap-2">
             {/* Model selector — only in manual mode */}
             {chatMode === "manual" && (
               <div style={{ position: "relative" }}>
@@ -461,7 +461,7 @@ export default function AiChatPage() {
 
       {/* Messages */}
       <div
-        className="flex-1 overflow-y-auto"
+        className="ai-chat-messages flex-1 overflow-y-auto"
         style={{
           padding: "20px",
           display: "flex",
@@ -487,7 +487,7 @@ export default function AiChatPage() {
 
       {/* Input bar */}
       <div
-        className="shrink-0 flex items-end"
+        className="ai-chat-composer shrink-0 flex items-end"
         style={{
           padding: "16px 20px",
           gap: "12px",

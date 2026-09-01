@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
 interface Days {
   monday: boolean;
   tuesday: boolean;
@@ -15,6 +13,7 @@ interface Days {
 interface DayPickerProps {
   days: Days;
   onChange: (days: Days) => void;
+  showClearButton?: boolean;
 }
 
 const DAY_KEYS: (keyof Days)[] = [
@@ -63,7 +62,7 @@ function allFalse(): Days {
   };
 }
 
-export default function DayPicker({ days, onChange }: DayPickerProps) {
+export default function DayPicker({ days, onChange, showClearButton = false }: DayPickerProps) {
   function toggleDay(key: keyof Days) {
     onChange({ ...days, [key]: !days[key] });
   }
@@ -122,6 +121,7 @@ export default function DayPicker({ days, onChange }: DayPickerProps) {
           ["Every Day", setEveryDay],
           ["Weekdays", setWeekdays],
           ["Weekends", setWeekends],
+          ...(showClearButton ? [["Unselect all", () => onChange(allFalse())] as [string, () => void]] : []),
         ] as [string, () => void][]).map(([label, handler]) => (
           <button
             key={label}

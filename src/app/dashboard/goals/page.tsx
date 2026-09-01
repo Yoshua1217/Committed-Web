@@ -14,7 +14,7 @@ function argbToHex(argb: number): string {
   return "#" + rgb.toString(16).padStart(6, "0").toUpperCase();
 }
 
-export default function GoalsPage() {
+export default function GoalsPage({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -67,8 +67,8 @@ export default function GoalsPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 32, maxWidth: 720 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", marginBottom: 24, marginTop: 0 }}>
+      <div style={{ padding: embedded ? 0 : 32, maxWidth: embedded ? undefined : 720 }}>
+        <h1 id="goals-heading" style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", marginBottom: 24, marginTop: 0 }}>
           Goals
         </h1>
         <div
@@ -87,10 +87,10 @@ export default function GoalsPage() {
   }
 
   return (
-    <div style={{ padding: 32, maxWidth: 720 }}>
+    <div style={{ padding: embedded ? 0 : 32, maxWidth: embedded ? undefined : 720 }}>
       {/* Header */}
       <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>
+        <h1 id="goals-heading" style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>
           Goals
         </h1>
         <button

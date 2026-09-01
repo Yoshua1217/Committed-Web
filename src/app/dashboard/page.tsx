@@ -115,6 +115,7 @@ export default function DashboardHome() {
           {!loading && scheduledHabits.length > 0 && (
             <div className="home-progress">
               <div
+                className="today-progress-card"
                 style={{
                   background: pct >= 100 ? "#4CAF5010" : "var(--surface)",
                   border: `1px solid ${pct >= 100 ? "#4CAF5040" : "var(--border)"}`,
@@ -123,9 +124,9 @@ export default function DashboardHome() {
                   marginBottom: 24,
                 }}
               >
-              <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today&apos;s Progress</span>
-                <span style={{ fontSize: 24, fontWeight: 800, color: progressColor }}>
+              <div className="today-progress-header flex items-center justify-between" style={{ marginBottom: 12 }}>
+                <span className="today-progress-title" style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today&apos;s Progress</span>
+                <span className="today-progress-percent" style={{ fontSize: 24, fontWeight: 800, color: progressColor }}>
                   {pct}%
                 </span>
               </div>
@@ -154,7 +155,7 @@ export default function DashboardHome() {
                   />
                 )}
               </div>
-              <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0, marginTop: 10 }}>
+              <p className="today-progress-copy" style={{ fontSize: 13, color: "var(--secondary)", margin: 0, marginTop: 10 }}>
                 {doneHabits.length} of {scheduledHabits.length} habits completed
               </p>
               </div>
@@ -169,7 +170,7 @@ export default function DashboardHome() {
                   Your Buckets
                 </h2>
                 <button
-                  onClick={() => router.push("/dashboard/buckets")}
+                  onClick={() => router.push("/dashboard/overview")}
                   style={{ fontSize: 13, fontWeight: 500, color: "var(--secondary)", background: "none", border: "none", cursor: "pointer" }}
                 >
                   View all &rarr;
@@ -181,7 +182,7 @@ export default function DashboardHome() {
                   return (
                     <div
                       key={bucket.id}
-                      onClick={() => router.push("/dashboard/buckets")}
+                      onClick={() => router.push("/dashboard/overview")}
                       className="shrink-0 flex items-center gap-3"
                       style={{
                         background: "var(--surface)",
@@ -216,7 +217,7 @@ export default function DashboardHome() {
                   Your Goals
                 </h2>
                 <button
-                  onClick={() => router.push("/dashboard/goals")}
+                  onClick={() => router.push("/dashboard/overview")}
                   style={{ fontSize: 13, fontWeight: 500, color: "var(--secondary)", background: "none", border: "none", cursor: "pointer" }}
                 >
                   View all &rarr;
@@ -229,7 +230,7 @@ export default function DashboardHome() {
                   return (
                     <div
                       key={goal.id}
-                      onClick={() => router.push("/dashboard/goals")}
+                      onClick={() => router.push("/dashboard/overview")}
                       style={{
                         background: "var(--surface)",
                         border: "1px solid var(--border)",

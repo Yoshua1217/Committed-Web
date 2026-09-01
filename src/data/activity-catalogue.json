@@ -1,0 +1,135 @@
+[
+  {
+    "id": "walking",
+    "name": "Walking",
+    "category": "Everyday movement",
+    "icon": "directions_walk",
+    "description": "A purposeful walk at any pace, from an easy reset around the block to a long city route. It is a simple way to build daily movement, clear your head, and support recovery without adding much training stress."
+  },
+  {
+    "id": "hiking",
+    "name": "Hiking",
+    "category": "Outdoor",
+    "icon": "hiking",
+    "description": "A trail-based walk that can include uneven ground, elevation, weather, and a pack. Log hikes when the terrain and time outdoors make the session feel more intentional than an everyday walk."
+  },
+  {
+    "id": "running",
+    "name": "Running",
+    "category": "Endurance",
+    "icon": "directions_run",
+    "description": "Continuous running on roads, paths, tracks, or treadmills. This is a flexible log for easy mileage, tempo efforts, interval sessions, and any run where you want the complete duration saved."
+  },
+  {
+    "id": "trail-running",
+    "name": "Trail Running",
+    "category": "Outdoor",
+    "icon": "terrain",
+    "description": "Running on trails where changing surfaces, climbs, descents, and technical footing are part of the challenge. Use this separately from road running when terrain is a meaningful part of the effort."
+  },
+  {
+    "id": "cycling",
+    "name": "Biking",
+    "category": "Endurance",
+    "icon": "directions_bike",
+    "description": "A bike ride for fitness, commuting, exploration, or recovery. This flexible entry fits outdoor rides and trainer sessions when you want to keep the focus on how long you were moving."
+  },
+  {
+    "id": "mountain-biking",
+    "name": "Mountain Biking",
+    "category": "Outdoor",
+    "icon": "pedal_bike",
+    "description": "Off-road cycling over trails, roots, rocks, and elevation changes. It captures the physical effort and technical focus of a ride where terrain matters as much as distance."
+  },
+  {
+    "id": "swimming",
+    "name": "Swimming",
+    "category": "Water",
+    "icon": "pool",
+    "description": "A continuous swim session in a pool or open water. Log relaxed laps, structured intervals, or long steady swims whenever you want a clear record of the time you spent in the water."
+  },
+  {
+    "id": "rock-climbing",
+    "name": "Rock Climbing",
+    "category": "Climbing",
+    "icon": "landscape",
+    "description": "Roped climbing indoors or outside, with repeated routes, belaying, and focused movement. This is for sessions where endurance, grip, technique, and problem solving all share the work."
+  },
+  {
+    "id": "bouldering",
+    "name": "Bouldering",
+    "category": "Climbing",
+    "icon": "sports_martial_arts",
+    "description": "Short, powerful climbing problems without ropes, usually with plenty of rest and repeated attempts. Use this when strength, technique, and working through difficult moves define the session."
+  },
+  {
+    "id": "rowing",
+    "name": "Rowing",
+    "category": "Endurance",
+    "icon": "rowing",
+    "description": "A rowing-machine, boat, or erg session that combines strong leg drive with a steady full-body rhythm. It works for easy aerobic rows, hard intervals, and longer endurance pieces."
+  },
+  {
+    "id": "kayaking",
+    "name": "Kayaking",
+    "category": "Water",
+    "icon": "kayaking",
+    "description": "A paddling session on lakes, rivers, or coastal water. Log it when the time spent moving, steering, and working through the water is the thing you want to remember."
+  },
+  {
+    "id": "canoeing",
+    "name": "Canoeing",
+    "category": "Water",
+    "icon": "directions_boat",
+    "description": "A canoe trip or training paddle, whether you are covering distance, exploring a route, or working through changing conditions. It is a calm but deceptively complete outdoor effort."
+  },
+  {
+    "id": "skiing",
+    "name": "Cross-Country Skiing",
+    "category": "Winter",
+    "icon": "downhill_skiing",
+    "description": "A Nordic skiing session that builds endurance through continuous full-body movement. Use it for a relaxed ski, a long route, or a harder interval day on groomed or natural snow."
+  },
+  {
+    "id": "downhill-skiing",
+    "name": "Downhill Skiing",
+    "category": "Winter",
+    "icon": "snowboarding",
+    "description": "A lift-accessed day or focused session on downhill terrain. It records the time you spent skiing, from a casual day on the hill to a demanding stretch of steep or technical runs."
+  },
+  {
+    "id": "snowboarding",
+    "name": "Snowboarding",
+    "category": "Winter",
+    "icon": "snowboarding",
+    "description": "A snowboarding session on groomed runs, powder, parks, or backcountry terrain. Use it to capture a day that blends leg endurance, balance, control, and time on the mountain."
+  },
+  {
+    "id": "dance",
+    "name": "Dance",
+    "category": "Movement",
+    "icon": "music_note",
+    "description": "A class, practice, rehearsal, or free-form session built around rhythm and movement. It is a great way to log active time that develops coordination, expression, and conditioning together."
+  },
+  {
+    "id": "team-sport",
+    "name": "Team Sport",
+    "category": "Sport",
+    "icon": "sports_soccer",
+    "description": "A game, practice, scrimmage, or skill session for any field, court, or rink sport. Record the full session when the mix of running, repeated effort, and competition is what matters."
+  },
+  {
+    "id": "martial-arts",
+    "name": "Martial Arts",
+    "category": "Sport",
+    "icon": "sports_martial_arts",
+    "description": "A class, drilling session, sparring round, or technical practice in any martial art. It is a place to capture the time spent on skill, conditioning, discipline, and controlled intensity."
+  },
+  {
+    "id": "mobility-flow",
+    "name": "Mobility Flow",
+    "category": "Recovery",
+    "icon": "self_improvement",
+    "description": "An intentional movement session focused on range of motion, control, and feeling better in your body. It is ideal for a longer mobility practice that deserves more context than a quick stretch."
+  }
+]

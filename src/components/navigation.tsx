@@ -14,12 +14,18 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Home", path: "/dashboard", icon: "home" },
-  { label: "Buckets", path: "/dashboard/buckets", icon: "bucket" },
-  { label: "Goals", path: "/dashboard/goals", icon: "goal" },
+  { label: "Overview", path: "/dashboard/overview", icon: "overview" },
   { label: "Habits", path: "/dashboard/habits", icon: "habit" },
-  { label: "Tasks", path: "/dashboard/tasks", icon: "task" },
   { label: "Tools", path: "/dashboard/tools", icon: "tools" },
-  { label: "AI Chat", path: "/dashboard/ai-chat", icon: "ai" },
+  { label: "Workouts", path: "/dashboard/workouts", icon: "workouts" },
+];
+
+const mobileNavItems: NavItem[] = [
+  navItems[0],
+  navItems[4],
+  navItems[2],
+  navItems[3],
+  navItems[1],
 ];
 
 function NavIcon({ icon, active }: { icon: string; active: boolean }) {
@@ -47,6 +53,16 @@ function NavIcon({ icon, active }: { icon: string; active: boolean }) {
           <line x1="4" y1="22" x2="4" y2="15" />
         </svg>
       );
+    case "overview":
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <path d="M14 17.5h7" />
+          <path d="M17.5 14v7" />
+        </svg>
+      );
     case "habit":
       return (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -67,6 +83,16 @@ function NavIcon({ icon, active }: { icon: string; active: boolean }) {
       return (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+        </svg>
+      );
+    case "workouts":
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 9v6" />
+          <path d="M7 6v12" />
+          <path d="M7 12h10" />
+          <path d="M17 6v12" />
+          <path d="M20 9v6" />
         </svg>
       );
     case "ai":
@@ -240,10 +266,10 @@ export default function Navigation() {
         style={{
           backgroundColor: "var(--surface)",
           borderTop: "1px solid var(--border)",
-          padding: "8px 8px calc(8px + env(safe-area-inset-bottom))",
+          padding: "8px 8px calc(8px + var(--app-safe-bottom))",
         }}
       >
-        {navItems.map((item) => {
+        {mobileNavItems.map((item) => {
           const active =
             pathname === item.path ||
             (item.path !== "/dashboard" && pathname.startsWith(item.path));

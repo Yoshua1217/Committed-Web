@@ -66,6 +66,7 @@ export default function AuthScreen() {
 
   return (
     <div
+      className="auth-screen"
       style={{
         minHeight: "100vh",
         display: "flex",

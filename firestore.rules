@@ -51,6 +51,28 @@ service cloud.firestore {
         && ownsHabit(request.resource.data.habitId);
     }
 
+    match /workouts/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /workout_sessions/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /workout_personal_records/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      // Completion reads this deterministic record before it may exist. Its ID
+      // is always `${uid}_${exerciseId}`, so allow the owner to read that path.
+      allow read: if isOwner(resource.data)
+        || (isSignedIn() && documentId.matches(request.auth.uid + '_.*'));
+      allow delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
     // Settings use the Firebase Auth UID as the document ID.
     match /userSettings/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;

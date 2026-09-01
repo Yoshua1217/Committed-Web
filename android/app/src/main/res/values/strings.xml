@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Committed</string>
+    <string name="title_activity_main">Committed</string>
+    <string name="package_name">com.committed.app</string>
+    <string name="custom_url_scheme">com.committed.app</string>
+</resources>
