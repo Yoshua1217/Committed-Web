@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
+import { Habit, HabitCompletion, Bucket, Goal, ScheduledCheckIn } from "@/lib/types";
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
@@ -21,6 +21,8 @@ import HabitCard from "@/components/habit-card";
 import ProgressCard from "@/components/progress-card";
 import HabitEditModal from "@/components/habit-edit-modal";
 import HabitCompletionChart from "@/components/habit-completion-chart";
+import ScheduleCheckInModal from "@/components/schedule-checkin-modal";
+import { scheduleHabitCheckIn, subscribeToScheduledCheckIns } from "@/lib/scheduled-checkins-service";
 
 const sectionHeaderStyle: React.CSSProperties = {
   fontSize: 11,
@@ -61,6 +63,8 @@ export default function HabitsPage() {
   const [completingHabitId, setCompletingHabitId] = useState<string | null>(null);
   const [justCompletedHabitId, setJustCompletedHabitId] = useState<string | null>(null);
   const [completionFlight, setCompletionFlight] = useState<CompletionFlight | null>(null);
+  const [scheduledCheckIns, setScheduledCheckIns] = useState<ScheduledCheckIn[]>([]);
+  const [habitToSchedule, setHabitToSchedule] = useState<Habit | null>(null);
   const completionTransitionTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completedEntryTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flightTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -88,6 +92,7 @@ export default function HabitsPage() {
     unsubs.push(subscribeToGoals(user.uid, (g) => {
       setGoals(g);
     }));
+    unsubs.push(subscribeToScheduledCheckIns(user.uid, setScheduledCheckIns));
 
     return () => unsubs.forEach((u) => u());
   }, [user, today]);
@@ -105,6 +110,7 @@ export default function HabitsPage() {
   );
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
+  const pendingCheckInForHabit = (habitId: string) => scheduledCheckIns.find((checkIn) => checkIn.status === "pending" && checkIn.sourceType === "habit" && checkIn.sourceId === habitId) ?? null;
 
   // Keep a newly checked card in place briefly so it can animate out before
   // React moves it into the completed group.
@@ -308,7 +314,7 @@ export default function HabitsPage() {
               <div className="flex flex-col" style={{ gap: 8 }}>
                 {todoHabits.map((habit) => (
                   <div key={habit.id} ref={(element) => { if (element) habitCardRefs.current.set(habit.id, element); else habitCardRefs.current.delete(habit.id); }} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
-                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed={habit.id === completingHabitId} completionAnimation={habit.id === completingHabitId ? "confirming" : undefined} />
+                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} onScheduleCheckIn={() => setHabitToSchedule(habit)} pendingCheckInAt={pendingCheckInForHabit(habit.id)?.dueAt ?? null} completed={habit.id === completingHabitId} completionAnimation={habit.id === completingHabitId ? "confirming" : undefined} />
                   </div>
                 ))}
               </div>
@@ -323,7 +329,7 @@ export default function HabitsPage() {
               <div className="flex flex-col" style={{ gap: 8 }}>
                 {doneHabits.map((habit) => (
                   <div key={habit.id} ref={(element) => { if (element) habitCardRefs.current.set(habit.id, element); else habitCardRefs.current.delete(habit.id); }} draggable={!savingOrder} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; setDraggedHabitId(habit.id); setDropTarget(null); }} onDragOver={(event) => handleDragOverHabit(habit.id, event)} onDragEnd={() => { setDraggedHabitId(null); setDropTarget(null); }} onDrop={(event) => void handleDropHabit(habit.id, event)} className={habit.id === justCompletedHabitId ? "habit-card-flight-target" : undefined} style={{ cursor: savingOrder ? "default" : "grab", opacity: draggedHabitId === habit.id ? 0.45 : 1, boxShadow: dropTarget?.habitId === habit.id ? dropTarget.position === "before" ? "0 -4px 0 #41e987" : "0 4px 0 #41e987" : "none", borderRadius: 16, transition: "opacity 0.15s ease, box-shadow 0.12s ease" }}>
-                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} completed />
+                    <HabitCard habit={habit} completion={completionMap.get(habit.id) ?? null} bucket={bucketMap.get(habit.bucketId) ?? null} goal={goalMap.get(habit.goalId) ?? null} streak={null} onToggleCheckbox={() => handleToggleCheckbox(habit)} onIncrementCounter={() => handleIncrementCounter(habit)} onAddTimerSeconds={(seconds) => handleAddTimerSeconds(habit, seconds)} onScheduleCheckIn={() => setHabitToSchedule(habit)} pendingCheckInAt={pendingCheckInForHabit(habit.id)?.dueAt ?? null} completed />
                   </div>
                 ))}
               </div>
@@ -367,6 +373,7 @@ export default function HabitsPage() {
           <HabitCard habit={completionFlight.habit} completion={completionMap.get(completionFlight.habit.id) ?? null} bucket={bucketMap.get(completionFlight.habit.bucketId) ?? null} goal={goalMap.get(completionFlight.habit.goalId) ?? null} streak={null} onToggleCheckbox={() => {}} onIncrementCounter={() => {}} onAddTimerSeconds={() => {}} completed completionAnimation="confirming" />
         </div>
       )}
+      {habitToSchedule && <ScheduleCheckInModal title={habitToSchedule.name} detail="We’ll keep this habit pending and ask whether you completed it when you next open the dashboard after your chosen time." onClose={() => setHabitToSchedule(null)} onSchedule={async (time) => { await scheduleHabitCheckIn(habitToSchedule, time); }} />}
     </div>
   );
 }

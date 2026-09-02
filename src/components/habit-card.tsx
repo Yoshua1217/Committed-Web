@@ -17,6 +17,8 @@ interface HabitCardProps {
   onToggleCheckbox: () => void;
   onIncrementCounter: () => void;
   onAddTimerSeconds: (seconds: number) => void;
+  onScheduleCheckIn?: () => void;
+  pendingCheckInAt?: number | null;
   completed: boolean;
   completionAnimation?: "confirming" | "settled";
 }
@@ -44,6 +46,8 @@ export default function HabitCard({
   onToggleCheckbox,
   onIncrementCounter,
   onAddTimerSeconds,
+  onScheduleCheckIn,
+  pendingCheckInAt,
   completed,
   completionAnimation,
 }: HabitCardProps) {
@@ -53,6 +57,7 @@ export default function HabitCard({
     ? (streak?.currentStreak ?? 0) + 1
     : (streak?.currentStreak ?? 0);
   const displayedAntiStreak = completed ? 0 : (streak?.currentAntiStreak ?? 0);
+  const pendingCheckInLabel = pendingCheckInAt ? new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(pendingCheckInAt)) : null;
 
   // Progress for counter/timer
   let progress = 0;
@@ -117,7 +122,12 @@ export default function HabitCard({
               )}
             </div>
           )}
+          {pendingCheckInLabel && <p style={{ margin: "3px 0 0", color: "#d69e13", fontSize: 11, fontWeight: 700 }}>Check-in scheduled for {pendingCheckInLabel}</p>}
         </div>
+
+        {!completed && onScheduleCheckIn && (
+          <button type="button" onClick={(event) => { event.stopPropagation(); onScheduleCheckIn(); }} aria-label={`Schedule a check-in for ${habit.name}`} title="Schedule check-in" style={{ width: 34, height: 34, display: "grid", placeItems: "center", flexShrink: 0, padding: 0, border: pendingCheckInAt ? "1px solid #f5c84c77" : "1px solid var(--border)", borderRadius: 10, background: pendingCheckInAt ? "#f5c84c16" : "var(--surface-variant)", color: pendingCheckInAt ? "#d69e13" : "var(--secondary)", cursor: "pointer" }}><MaterialIcon name="schedule" size={18} /></button>
+        )}
 
         {/* Completion widget */}
         {habit.completionType === "checkbox" && (

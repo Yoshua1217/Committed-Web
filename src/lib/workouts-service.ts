@@ -1,7 +1,9 @@
 import { db } from "@/lib/firebase";
-import { ActivityDefinition, ActivityIntensity, WorkoutDefinition, WorkoutPersonalRecordEvent, WorkoutSession } from "@/lib/types";
+import { ActivityDefinition, ActivityIntensity, StretchRoutineDefinition, WorkoutDefinition, WorkoutPersonalRecordEvent, WorkoutSession } from "@/lib/types";
 import exerciseCatalogueJson from "@/data/exercise-catalogue.json";
 import { ExerciseDefinition } from "@/lib/types";
+import stretchCatalogueJson from "@/data/stretching-catalogue.json";
+import { StretchDefinition } from "@/lib/types";
 import { collection, deleteDoc, doc, getDocs, onSnapshot, query, runTransaction, setDoc, where } from "firebase/firestore";
 
 function generateId(): string {
@@ -13,6 +15,7 @@ function generateId(): string {
 }
 
 const exerciseCatalogue = exerciseCatalogueJson as ExerciseDefinition[];
+const stretchCatalogue = stretchCatalogueJson as StretchDefinition[];
 
 function localDateString(time: number): string {
   const date = new Date(time);
@@ -83,6 +86,20 @@ export function createActivitySession(userId: string, activity: ActivityDefiniti
     exercises: [],
     createdAt: now,
     updatedAt: now,
+  };
+}
+
+/** Starts a simple, untimed stretching session from a saved routine. */
+export function createStretchRoutineSession(userId: string, routine: StretchRoutineDefinition): WorkoutSession {
+  const now = Date.now();
+  return {
+    id: generateId(), userId, sessionType: "stretch", workoutId: routine.id, workoutNameSnapshot: routine.name,
+    stretchRoutineId: routine.id, stretchRoutineDescriptionSnapshot: routine.description,
+    stretches: routine.stretches.slice().sort((a, b) => a.sortOrder - b.sortOrder).flatMap((plan) => {
+      const stretch = stretchCatalogue.find((item) => item.id === plan.stretchId);
+      return stretch ? [{ stretchId: stretch.id, stretchNameSnapshot: stretch.name, summarySnapshot: stretch.summary, instructionsSnapshot: stretch.instructions, holdSeconds: plan.holdSeconds, sortOrder: plan.sortOrder }] : [];
+    }),
+    startedAt: now, completedAt: null, durationSeconds: null, completedDate: null, status: "active", personalRecords: [], exercises: [], createdAt: now, updatedAt: now,
   };
 }
 
@@ -159,15 +176,27 @@ function workoutFromFirestore(data: Record<string, unknown>): WorkoutDefinition 
   };
 }
 
+function stretchRoutineFromFirestore(data: Record<string, unknown>): StretchRoutineDefinition {
+  return {
+    id: (data.id as string) ?? "", userId: (data.userId as string) ?? "", name: (data.name as string) ?? "", description: (data.description as string) ?? "",
+    scheduledDays: Array.isArray(data.scheduledDays) ? data.scheduledDays.map(Number) as StretchRoutineDefinition["scheduledDays"] : [],
+    stretches: Array.isArray(data.stretches) ? data.stretches as StretchRoutineDefinition["stretches"] : [],
+    sortOrder: Number(data.sortOrder ?? 0), createdAt: Number(data.createdAt ?? 0), updatedAt: Number(data.updatedAt ?? 0),
+  };
+}
+
 function sessionFromFirestore(data: Record<string, unknown>): WorkoutSession {
   const activityIntensity = data.activityIntensity;
   return {
-    id: (data.id as string) ?? "", userId: (data.userId as string) ?? "", sessionType: data.sessionType === "activity" ? "activity" : "workout", workoutId: (data.workoutId as string) ?? "", workoutNameSnapshot: (data.workoutNameSnapshot as string) ?? "",
+    id: (data.id as string) ?? "", userId: (data.userId as string) ?? "", sessionType: data.sessionType === "activity" || data.sessionType === "stretch" ? data.sessionType : "workout", workoutId: (data.workoutId as string) ?? "", workoutNameSnapshot: (data.workoutNameSnapshot as string) ?? "",
     activityId: typeof data.activityId === "string" ? data.activityId : undefined,
     activityCategorySnapshot: typeof data.activityCategorySnapshot === "string" ? data.activityCategorySnapshot : undefined,
     activityIconSnapshot: typeof data.activityIconSnapshot === "string" ? data.activityIconSnapshot : undefined,
     activityDescriptionSnapshot: typeof data.activityDescriptionSnapshot === "string" ? data.activityDescriptionSnapshot : undefined,
     activityIntensity: activityIntensity === "easy" || activityIntensity === "steady" || activityIntensity === "hard" || activityIntensity === "all_out" ? activityIntensity : null,
+    stretchRoutineId: typeof data.stretchRoutineId === "string" ? data.stretchRoutineId : undefined,
+    stretchRoutineDescriptionSnapshot: typeof data.stretchRoutineDescriptionSnapshot === "string" ? data.stretchRoutineDescriptionSnapshot : undefined,
+    stretches: Array.isArray(data.stretches) ? data.stretches as WorkoutSession["stretches"] : [],
     startedAt: Number(data.startedAt ?? 0), completedAt: typeof data.completedAt === "number" ? data.completedAt : null, durationSeconds: typeof data.durationSeconds === "number" ? data.durationSeconds : null, completedDate: typeof data.completedDate === "string" ? data.completedDate : null,
     status: data.status === "completed" || data.status === "abandoned" ? data.status : "active",
     personalRecords: Array.isArray(data.personalRecords) ? data.personalRecords as WorkoutSession["personalRecords"] : [],
@@ -180,6 +209,12 @@ export function subscribeToWorkouts(userId: string, callback: (workouts: Workout
   return onSnapshot(query(collection(db, "workouts"), where("userId", "==", userId)), (snapshot) => {
     callback(snapshot.docs.map((snapshotDoc) => workoutFromFirestore(snapshotDoc.data())).sort((a, b) => a.sortOrder - b.sortOrder));
   }, (error) => { console.error("subscribeToWorkouts error:", error); callback([]); });
+}
+
+export function subscribeToStretchRoutines(userId: string, callback: (routines: StretchRoutineDefinition[]) => void): () => void {
+  return onSnapshot(query(collection(db, "stretch_routines"), where("userId", "==", userId)), (snapshot) => {
+    callback(snapshot.docs.map((snapshotDoc) => stretchRoutineFromFirestore(snapshotDoc.data())).sort((a, b) => a.sortOrder - b.sortOrder));
+  }, (error) => { console.error("subscribeToStretchRoutines error:", error); callback([]); });
 }
 
 export function subscribeToActiveWorkoutSession(userId: string, callback: (session: WorkoutSession | null) => void): () => void {
@@ -212,6 +247,10 @@ export async function saveWorkout(workout: WorkoutDefinition): Promise<void> {
 
 export async function deleteWorkout(workoutId: string): Promise<void> {
   await deleteDoc(doc(db, "workouts", workoutId));
+}
+
+export async function saveStretchRoutine(routine: StretchRoutineDefinition): Promise<void> {
+  await setDoc(doc(db, "stretch_routines", routine.id), routine);
 }
 
 export async function saveWorkoutSession(session: WorkoutSession): Promise<void> {
@@ -251,7 +290,7 @@ export async function deleteCompletedWorkoutSession(session: WorkoutSession): Pr
 
 /** Deletes either kind of completed training record from the shared history. */
 export async function deleteCompletedSession(session: WorkoutSession): Promise<void> {
-  if (session.sessionType === "activity") {
+  if (session.sessionType === "activity" || session.sessionType === "stretch") {
     await deleteDoc(doc(db, "workout_sessions", session.id));
     return;
   }

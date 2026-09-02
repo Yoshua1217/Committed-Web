@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
+import { Habit, HabitCompletion, Bucket, Goal, ScheduledCheckIn } from "@/lib/types";
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
@@ -18,6 +18,8 @@ import { isScheduledForDate } from "@/lib/streak-calculator";
 import { getProgressColor } from "@/lib/progress-color";
 import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
+import ScheduledCheckInPopup from "@/components/scheduled-checkin-popup";
+import { resolveScheduledCheckIn, subscribeToScheduledCheckIns } from "@/lib/scheduled-checkins-service";
 
 function argbToHex(argb: number): string {
   const rgb = argb & 0x00ffffff;
@@ -41,6 +43,8 @@ export default function DashboardHome() {
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scheduledCheckIns, setScheduledCheckIns] = useState<ScheduledCheckIn[]>([]);
+  const [checkInClock, setCheckInClock] = useState(() => Date.now());
 
   useEffect(() => {
     if (!user) return;
@@ -49,8 +53,14 @@ export default function DashboardHome() {
     unsubs.push(subscribeToCompletionsForDate(user.uid, today, (c) => setCompletions(c)));
     unsubs.push(subscribeToBuckets(user.uid, (b) => setBuckets(b)));
     unsubs.push(subscribeToGoals(user.uid, (g) => setGoals(g)));
+    unsubs.push(subscribeToScheduledCheckIns(user.uid, setScheduledCheckIns));
     return () => unsubs.forEach((u) => u());
   }, [user, today]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCheckInClock(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
@@ -78,6 +88,7 @@ export default function DashboardHome() {
   }, 0);
   const pct = scheduledHabits.length > 0 ? Math.round((progressSum / scheduledHabits.length) * 100) : 0;
   const progressColor = getProgressColor(pct);
+  const dueCheckIns = scheduledCheckIns.filter((checkIn) => checkIn.status === "pending" && checkIn.dueAt <= checkInClock);
 
   const handleToggleCheckbox = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
@@ -92,6 +103,10 @@ export default function DashboardHome() {
   const handleAddTimerSeconds = async (habit: Habit, seconds: number) => {
     const existing = completionMap.get(habit.id) ?? null;
     await addTimerSeconds(habit, today, existing, seconds);
+  };
+
+  const handleResolveCheckIn = async (checkIn: ScheduledCheckIn, decision: "completed" | "missed") => {
+    await resolveScheduledCheckIn(checkIn, decision);
   };
 
   return (
@@ -430,6 +445,7 @@ export default function DashboardHome() {
           </div>
         )}
       </div>
+      {dueCheckIns.length > 0 && <ScheduledCheckInPopup checkIns={dueCheckIns} onResolve={handleResolveCheckIn} />}
     </div>
   );
 }

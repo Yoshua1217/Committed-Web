@@ -57,6 +57,18 @@ service cloud.firestore {
       allow update: if isOwner(resource.data) && isOwner(request.resource.data);
     }
 
+    match /stretch_routines/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /scheduled_check_ins/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
     match /workout_sessions/{documentId} {
       allow create: if isOwner(request.resource.data);
       allow read, delete: if isOwner(resource.data);

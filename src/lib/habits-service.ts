@@ -10,6 +10,7 @@ import {
   setDoc,
   deleteDoc,
   getDocs,
+  getDoc,
 } from "firebase/firestore";
 
 // ---------------------------------------------------------------------------
@@ -261,6 +262,40 @@ export async function getCompletionsForDate(
   );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => d.data() as HabitCompletion);
+}
+
+/** Marks a habit complete without changing existing counter or timer progress. */
+export async function markHabitComplete(
+  userId: string,
+  habitId: string,
+  date: string
+): Promise<HabitCompletion | null> {
+  const habitSnapshot = await getDoc(doc(db, "habits", habitId));
+  if (!habitSnapshot.exists()) return null;
+
+  const habit = habitFromFirestore(habitSnapshot.data() as Record<string, unknown>);
+  if (habit.userId !== userId) return null;
+
+  const existing = (await getCompletionsForDate(userId, date))
+    .find((completion) => completion.habitId === habitId) ?? null;
+  // A stable ID prevents two near-simultaneous completed sessions from creating
+  // duplicate mapped completions when the habit has no completion yet.
+  const mappedBase = existing ?? {
+    id: `workout-map-${habitId}-${date}`,
+    habitId,
+    date,
+    completed: false,
+    counterValue: 0,
+    timerSeconds: 0,
+    completedAt: null,
+    userId,
+  };
+  const completion = buildCompletion(habit, date, mappedBase, {
+    completed: true,
+    completedAt: existing?.completedAt ?? Date.now(),
+  });
+  await saveCompletion(completion);
+  return completion;
 }
 
 /** Fetch a user's completion history for progress and reporting views. */

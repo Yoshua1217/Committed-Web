@@ -91,6 +91,10 @@ export interface UserSettings {
   mainGoals: string;
   mainStruggles: string;
   customPrompt: string;
+  workoutHabitMappingEnabled: boolean;
+  workoutHabitMappingHabitId: string | null;
+  stretchHabitMappingEnabled: boolean;
+  stretchHabitMappingHabitId: string | null;
 }
 
 export type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearms" | "Core" | "Quadriceps" | "Hamstrings" | "Glutes" | "Calves" | "Full body";
@@ -130,8 +134,59 @@ export interface WorkoutDefinition {
   updatedAt: number;
 }
 
+/** A curated stretch from the hard-coded stretching catalogue. */
+export interface StretchDefinition {
+  id: string;
+  name: string;
+  primaryMuscleGroups: MuscleGroup[];
+  secondaryMuscleGroups: MuscleGroup[];
+  summary: string;
+  instructions: string;
+}
+
+export interface StretchRoutinePlan {
+  stretchId: string;
+  /** Seconds to hold this stretch before moving to the next one. */
+  holdSeconds: number;
+  sortOrder: number;
+}
+
+/** Scheduling is saved independently and never contributes to workout progress. */
+export interface StretchRoutineDefinition {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  scheduledDays: WorkoutDay[];
+  stretches: StretchRoutinePlan[];
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ScheduledCheckInSourceType = "habit" | "stretch_routine";
+export type ScheduledCheckInStatus = "pending" | "completed" | "missed";
+
+/** A one-time promise to check back in with the user after a chosen local time. */
+export interface ScheduledCheckIn {
+  id: string;
+  userId: string;
+  sourceType: ScheduledCheckInSourceType;
+  sourceId: string;
+  sourceNameSnapshot: string;
+  /** The local calendar day represented by this check-in (YYYY-MM-DD). */
+  scheduledForDate: string;
+  dueAt: number;
+  status: ScheduledCheckInStatus;
+  resolvedAt: number | null;
+  /** A routine can be completed even if the template changes before the user checks in. */
+  stretchRoutineSnapshot?: StretchRoutineDefinition;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type WorkoutSessionStatus = "active" | "completed" | "abandoned";
-export type WorkoutSessionType = "workout" | "activity";
+export type WorkoutSessionType = "workout" | "activity" | "stretch";
 
 /** The perceived effort selected after an activity is finished. */
 export type ActivityIntensity = "easy" | "steady" | "hard" | "all_out";
@@ -163,6 +218,16 @@ export interface WorkoutExerciseLog {
   sets: WorkoutSetLog[];
 }
 
+/** A frozen stretch entry keeps completed routines readable if the catalogue later changes. */
+export interface StretchRoutineLog {
+  stretchId: string;
+  stretchNameSnapshot: string;
+  summarySnapshot: string;
+  instructionsSnapshot: string;
+  holdSeconds: number;
+  sortOrder: number;
+}
+
 export interface WorkoutPersonalRecordEvent {
   exerciseId: string;
   exerciseNameSnapshot: string;
@@ -185,6 +250,10 @@ export interface WorkoutSession {
   activityIconSnapshot?: string;
   activityDescriptionSnapshot?: string;
   activityIntensity?: ActivityIntensity | null;
+  /** Stretch-routine-only snapshots. */
+  stretchRoutineId?: string;
+  stretchRoutineDescriptionSnapshot?: string;
+  stretches?: StretchRoutineLog[];
   startedAt: number;
   completedAt: number | null;
   /** Frozen elapsed time when finished, in seconds. */
