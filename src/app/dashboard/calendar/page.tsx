@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Haptics } from "@capacitor/haptics";
 import { useAuth } from "@/lib/auth-context";
 import CalendarEventEditorModal, { CalendarEditorPreset, CalendarEventDraft } from "@/components/calendar-event-editor-modal";
 import {
@@ -36,6 +37,12 @@ const HOURS = Array.from({ length: 24 }, (_, index) => index);
 const EVENT_GAP = 6;
 const GRID_TICK_LENGTH = 7;
 const SNAP_MINUTES = 15;
+const EVENT_LONG_PRESS_MS = 450;
+const EVENT_LONG_PRESS_CANCEL_DISTANCE = 10;
+const DAY_SWIPE_THRESHOLD = 64;
+const DAY_SWIPE_DIRECTION_RATIO = 1.25;
+const DAY_SWIPE_MAX_DRAG = 120;
+const DAY_SWIPE_SETTLE_MS = 150;
 const ACCESS_TOKEN_MAX_AGE = 50 * 60_000;
 
 type EventMutation =
@@ -762,7 +769,7 @@ export default function CalendarPage() {
         <main className="calendar-main">
           {view === "month"
             ? <MonthView focusDate={focusDate} events={visibleEvents} calendars={calendars} onSelectEvent={setSelectedEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} />
-            : <TimeGrid view={view} days={view === "day" ? [focusDate] : weekDays} events={visibleEvents} calendars={calendars} onSelectEvent={setSelectedEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} />}
+            : <TimeGrid view={view} days={view === "day" ? [focusDate] : weekDays} events={visibleEvents} calendars={calendars} onSelectEvent={setSelectedEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} onSwipeDay={move} />}
         </main>
       </div>
       {selectedEvent && <CalendarEventModal event={selectedEvent} calendar={calendars.find((calendar) => calendar.id === selectedEvent.calendarId)} onClose={() => setSelectedEvent(null)} onEdit={isEventWritable(selectedEvent, calendars.find((calendar) => calendar.id === selectedEvent.calendarId)) ? () => openEditEditor(selectedEvent) : undefined} />}
@@ -773,21 +780,31 @@ export default function CalendarPage() {
   );
 }
 
-function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent, onRequestMutation }: { view: CalendarView; days: Date[]; events: GoogleCalendarEvent[]; calendars: GoogleCalendar[]; onSelectEvent: (event: GoogleCalendarEvent) => void; onCreateEvent: (preset: CalendarEditorPreset) => void; onRequestMutation: (mutation: EventMutation) => void }) {
+function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent, onRequestMutation, onSwipeDay }: { view: CalendarView; days: Date[]; events: GoogleCalendarEvent[]; calendars: GoogleCalendar[]; onSelectEvent: (event: GoogleCalendarEvent) => void; onCreateEvent: (preset: CalendarEditorPreset) => void; onRequestMutation: (mutation: EventMutation) => void; onSwipeDay: (direction: number) => void }) {
   const [now, setNow] = useState(() => new Date());
   const [creationPreview, setCreationPreview] = useState<{ start: Date; end: Date } | null>(null);
   const [eventPreview, setEventPreview] = useState<{ key: string; start: Date; end: Date } | null>(null);
+  const [daySwipeOffset, setDaySwipeOffset] = useState(0);
+  const [daySwipeSettling, setDaySwipeSettling] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const columnsRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const creationGestureRef = useRef<{ pointerId: number; startSlot: Date; moved: boolean; startX: number; startY: number } | null>(null);
-  const eventGestureRef = useRef<{ pointerId: number; event: GoogleCalendarEvent; mode: "move" | "start" | "end"; startSlot: Date; originalStart: Date; originalEnd: Date; moved: boolean; startX: number; startY: number } | null>(null);
+  const eventGestureRef = useRef<{ pointerId: number; event: GoogleCalendarEvent; mode: "move" | "start" | "end"; startSlot: Date; originalStart: Date; originalEnd: Date; moved: boolean; activated: boolean; isTouch: boolean; longPressTimer: number | null; target: HTMLElement; startX: number; startY: number } | null>(null);
   const allDayGestureRef = useRef<{ pointerId: number; event: GoogleCalendarEvent; mode: "move" | "start" | "end"; startDayIndex: number; moved: boolean; startX: number } | null>(null);
+  const daySwipeRef = useRef<{ pointerId: number; startX: number; startY: number; axis: "pending" | "horizontal" | "vertical" } | null>(null);
+  const daySwipeTimerRef = useRef<number | null>(null);
+  const eventDragPointersRef = useRef(new Set<number>());
   const suppressEventClickRef = useRef(false);
 
   useEffect(() => {
     const interval = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      const gesture = eventGestureRef.current;
+      if (gesture && gesture.longPressTimer !== null) window.clearTimeout(gesture.longPressTimer);
+      if (daySwipeTimerRef.current !== null) window.clearTimeout(daySwipeTimerRef.current);
+    };
   }, []);
 
   const today = dateKey(now);
@@ -858,9 +875,9 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
     if (!isEventWritable(event, calendar) || !event.start?.dateTime) return;
     const startSlot = pointerSlot(pointerEvent.clientX, pointerEvent.clientY);
     if (!startSlot) return;
-    pointerEvent.stopPropagation();
-    pointerEvent.currentTarget.setPointerCapture(pointerEvent.pointerId);
-    eventGestureRef.current = {
+    const isTouch = pointerEvent.pointerType === "touch";
+    const target = pointerEvent.currentTarget;
+    const gesture = {
       pointerId: pointerEvent.pointerId,
       event,
       mode,
@@ -868,18 +885,53 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
       originalStart: new Date(event.start.dateTime),
       originalEnd: event.end?.dateTime ? new Date(event.end.dateTime) : new Date(new Date(event.start.dateTime).getTime() + 30 * 60_000),
       moved: false,
+      activated: !isTouch,
+      isTouch,
+      longPressTimer: null as number | null,
+      target,
       startX: pointerEvent.clientX,
       startY: pointerEvent.clientY,
     };
+    eventGestureRef.current = gesture;
+
+    if (!isTouch) {
+      pointerEvent.stopPropagation();
+      target.setPointerCapture(pointerEvent.pointerId);
+      return;
+    }
+
+    gesture.longPressTimer = window.setTimeout(() => {
+      const pendingGesture = eventGestureRef.current;
+      if (!pendingGesture || pendingGesture.pointerId !== gesture.pointerId) return;
+      pendingGesture.longPressTimer = null;
+      pendingGesture.activated = true;
+      eventDragPointersRef.current.add(pendingGesture.pointerId);
+      daySwipeRef.current = null;
+      setDaySwipeOffset(0);
+      pendingGesture.target.setPointerCapture(pendingGesture.pointerId);
+      suppressEventClickRef.current = true;
+      setEventPreview({ key: `${event.calendarId}-${event.id}`, start: new Date(pendingGesture.originalStart), end: new Date(pendingGesture.originalEnd) });
+      void Haptics.vibrate({ duration: 55 }).catch(() => undefined);
+    }, EVENT_LONG_PRESS_MS);
   };
 
   const updateEventGesture = (pointerEvent: React.PointerEvent<HTMLElement>) => {
     const gesture = eventGestureRef.current;
     if (!gesture || gesture.pointerId !== pointerEvent.pointerId) return;
+    const distance = Math.hypot(pointerEvent.clientX - gesture.startX, pointerEvent.clientY - gesture.startY);
+    if (!gesture.activated) {
+      if (distance >= EVENT_LONG_PRESS_CANCEL_DISTANCE) {
+        if (gesture.longPressTimer !== null) window.clearTimeout(gesture.longPressTimer);
+        eventGestureRef.current = null;
+        setEventPreview(null);
+      }
+      return;
+    }
     pointerEvent.preventDefault();
+    pointerEvent.stopPropagation();
     const slot = pointerSlot(pointerEvent.clientX, pointerEvent.clientY);
     if (!slot) return;
-    if (Math.hypot(pointerEvent.clientX - gesture.startX, pointerEvent.clientY - gesture.startY) > 4) gesture.moved = true;
+    if (distance > 4) gesture.moved = true;
     if (!gesture.moved) return;
     let start = new Date(gesture.originalStart);
     let end = new Date(gesture.originalEnd);
@@ -898,9 +950,16 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
   const finishEventGesture = (pointerEvent: React.PointerEvent<HTMLElement>) => {
     const gesture = eventGestureRef.current;
     if (!gesture || gesture.pointerId !== pointerEvent.pointerId) return;
+    if (gesture.longPressTimer !== null) window.clearTimeout(gesture.longPressTimer);
     eventGestureRef.current = null;
+    if (!gesture.activated) {
+      setEventPreview(null);
+      return;
+    }
     if (!gesture.moved || !eventPreview) {
       setEventPreview(null);
+      window.setTimeout(() => eventDragPointersRef.current.delete(pointerEvent.pointerId), 0);
+      window.setTimeout(() => { suppressEventClickRef.current = false; }, 0);
       return;
     }
     suppressEventClickRef.current = true;
@@ -908,6 +967,87 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     onRequestMutation({ kind: "patch", event: gesture.event, patch: { start: { dateTime: eventPreview.start.toISOString(), timeZone }, end: { dateTime: eventPreview.end.toISOString(), timeZone } } });
     setEventPreview(null);
+    window.setTimeout(() => eventDragPointersRef.current.delete(pointerEvent.pointerId), 0);
+  };
+
+  const cancelEventGesture = () => {
+    const gesture = eventGestureRef.current;
+    if (gesture && gesture.longPressTimer !== null) window.clearTimeout(gesture.longPressTimer);
+    eventGestureRef.current = null;
+    if (gesture) eventDragPointersRef.current.delete(gesture.pointerId);
+    setEventPreview(null);
+    suppressEventClickRef.current = false;
+  };
+
+  const settleDaySwipe = (destination = 0, direction?: number) => {
+    setDaySwipeSettling(true);
+    setDaySwipeOffset(destination);
+    if (daySwipeTimerRef.current !== null) window.clearTimeout(daySwipeTimerRef.current);
+    daySwipeTimerRef.current = window.setTimeout(() => {
+      if (direction) onSwipeDay(direction);
+      setDaySwipeOffset(0);
+      window.requestAnimationFrame(() => setDaySwipeSettling(false));
+      daySwipeTimerRef.current = null;
+    }, DAY_SWIPE_SETTLE_MS);
+  };
+
+  const beginDaySwipe = (pointerEvent: React.PointerEvent<HTMLDivElement>) => {
+    if (view !== "day" || pointerEvent.pointerType !== "touch" || daySwipeSettling) return;
+    daySwipeRef.current = { pointerId: pointerEvent.pointerId, startX: pointerEvent.clientX, startY: pointerEvent.clientY, axis: "pending" };
+  };
+
+  const updateDaySwipe = (pointerEvent: React.PointerEvent<HTMLDivElement>) => {
+    const swipe = daySwipeRef.current;
+    if (!swipe || swipe.pointerId !== pointerEvent.pointerId) return;
+    if (eventDragPointersRef.current.has(pointerEvent.pointerId)) {
+      daySwipeRef.current = null;
+      setDaySwipeOffset(0);
+      return;
+    }
+    const deltaX = pointerEvent.clientX - swipe.startX;
+    const deltaY = pointerEvent.clientY - swipe.startY;
+    if (swipe.axis === "pending" && Math.hypot(deltaX, deltaY) >= 10) {
+      swipe.axis = Math.abs(deltaX) > Math.abs(deltaY) * DAY_SWIPE_DIRECTION_RATIO ? "horizontal" : "vertical";
+    }
+    if (swipe.axis === "vertical") {
+      daySwipeRef.current = null;
+      setDaySwipeOffset(0);
+      return;
+    }
+    if (swipe.axis !== "horizontal") return;
+    pointerEvent.preventDefault();
+    if (creationGestureRef.current?.pointerId === pointerEvent.pointerId) {
+      creationGestureRef.current = null;
+      setCreationPreview(null);
+    }
+    setDaySwipeOffset(Math.max(-DAY_SWIPE_MAX_DRAG, Math.min(DAY_SWIPE_MAX_DRAG, deltaX * 0.72)));
+  };
+
+  const finishDaySwipe = (pointerEvent: React.PointerEvent<HTMLDivElement>) => {
+    const swipe = daySwipeRef.current;
+    if (!swipe || swipe.pointerId !== pointerEvent.pointerId) return;
+    daySwipeRef.current = null;
+    if (eventDragPointersRef.current.has(pointerEvent.pointerId) || swipe.axis !== "horizontal") {
+      settleDaySwipe();
+      return;
+    }
+    const deltaX = pointerEvent.clientX - swipe.startX;
+    const deltaY = pointerEvent.clientY - swipe.startY;
+    const validSwipe = Math.abs(deltaX) >= DAY_SWIPE_THRESHOLD && Math.abs(deltaX) > Math.abs(deltaY) * DAY_SWIPE_DIRECTION_RATIO;
+    if (!validSwipe) {
+      settleDaySwipe();
+      return;
+    }
+    suppressEventClickRef.current = true;
+    window.setTimeout(() => { suppressEventClickRef.current = false; }, 0);
+    const direction = deltaX < 0 ? 1 : -1;
+    const exitDistance = Math.min(220, Math.max(150, pointerEvent.currentTarget.clientWidth * 0.45));
+    settleDaySwipe(deltaX < 0 ? -exitDistance : exitDistance, direction);
+  };
+
+  const cancelDaySwipe = () => {
+    daySwipeRef.current = null;
+    settleDaySwipe();
   };
 
   const headerDayIndex = (clientX: number) => {
@@ -989,7 +1129,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
     };
   };
 
-  return <div className={`calendar-time-view ${view === "day" ? "day-view" : "week-view"}`}>
+  return <div className={`calendar-time-view ${view === "day" ? "day-view" : "week-view"}${daySwipeSettling ? " day-swipe-settling" : ""}`} onPointerDown={beginDaySwipe} onPointerMove={updateDaySwipe} onPointerUp={finishDaySwipe} onPointerCancel={cancelDaySwipe} style={{ transform: view === "day" ? `translateX(${daySwipeOffset}px)` : undefined }}>
     <div className="calendar-time-header" ref={headerRef} style={{ "--day-count": days.length, flexBasis: hasAllDayEvents ? 58 : 36 } as React.CSSProperties}>
       <div />
       {days.map((day) => <div key={dateKey(day)} className={dateKey(day) === today ? "current-day" : ""} onClick={() => onCreateEvent({ start: new Date(`${dateKey(day)}T00:00:00`), end: new Date(`${addIsoDateDays(dateKey(day), 1)}T00:00:00`), allDay: true })} style={hasAllDayEvents ? { flexDirection: "column", gap: 0, padding: "3px 3px 2px", cursor: "pointer" } : { cursor: "pointer" }}>
@@ -1028,7 +1168,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
                 if (!segment) return null;
                 const isPast = hasEventPassed(event, now);
                 const editable = isEventWritable(event, calendars.find((calendar) => calendar.id === event.calendarId));
-                return <button type="button" className={`google-calendar-event${editable ? " editable" : ""}${eventPreview?.key === `${event.calendarId}-${event.id}` ? " dragging" : ""}`} key={`${event.calendarId}-${event.id}-${dateKey(day)}`} onClick={() => { if (!suppressEventClickRef.current) onSelectEvent(event); }} onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "move")} onPointerMove={updateEventGesture} onPointerUp={finishEventGesture} onPointerCancel={() => { eventGestureRef.current = null; setEventPreview(null); }} style={{ top: segment.top, height: segment.height, background: mutedCalendarColor(event.color), filter: isPast ? "brightness(.72) saturate(.82)" : undefined, opacity: isPast ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
+                return <button type="button" className={`google-calendar-event${editable ? " editable" : ""}${eventPreview?.key === `${event.calendarId}-${event.id}` ? " dragging" : ""}`} key={`${event.calendarId}-${event.id}-${dateKey(day)}`} onClick={() => { if (!suppressEventClickRef.current) onSelectEvent(event); }} onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "move")} onPointerMove={updateEventGesture} onPointerUp={finishEventGesture} onPointerCancel={cancelEventGesture} style={{ top: segment.top, height: segment.height, background: mutedCalendarColor(event.color), filter: isPast ? "brightness(.72) saturate(.82)" : undefined, opacity: isPast ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
                   {editable && segment.beginsHere && <span className="calendar-resize-handle top" onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "start")} />}
                   <strong>{event.summary ?? "Untitled event"}</strong>
                   {segment.height >= 48 && <span className="calendar-event-time">{eventTimeRange({ ...event, start: { ...event.start, dateTime: segment.start.toISOString() }, end: { ...event.end, dateTime: segment.end.toISOString() } })}</span>}

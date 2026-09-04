@@ -2,9 +2,10 @@
 
 import {
   ChangeEvent,
+  ClipboardEvent as ReactClipboardEvent,
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
-  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -30,12 +31,20 @@ import {
   subscribeToMarkdownNotes,
   subscribeToNoteFolders,
 } from "@/lib/notes-service";
-import NotesMarkdown from "@/components/notes-markdown";
+import { deleteNoteImages, uploadNoteImage } from "@/lib/note-image-service";
+import NotesMarkdown, { collectMarkdownHeadings } from "@/components/notes-markdown";
+import NotesFastScroll from "@/components/notes-fast-scroll";
 
 type EditorMode = "write" | "preview";
 type MenuAnchor = { left: number; top: number };
 
-interface SlashCommand {
+const NOTES_SIDEBAR_MIN_WIDTH = 220;
+const NOTES_SIDEBAR_MAX_WIDTH = 460;
+const NOTES_SIDEBAR_WIDTH_KEY = "committed-notes-sidebar-width";
+const NOTES_SIDEBAR_COLLAPSED_KEY = "committed-notes-sidebar-collapsed";
+const NOTES_LAST_OPENED_KEY_PREFIX = "committed-notes-last-opened:";
+
+interface SlashCommandBase {
   id: string;
   label: string;
   detail: string;
@@ -43,25 +52,102 @@ interface SlashCommand {
   keywords: string;
 }
 
+type SlashCommand = SlashCommandBase & (
+  | { kind: "insert"; value: string; placeholder?: string }
+  | { kind: "image" }
+);
+
 const SLASH_COMMANDS: SlashCommand[] = [
-  { id: "heading1", label: "Heading 1", detail: "Large section heading", icon: "format_h1", keywords: "h1 title" },
-  { id: "heading2", label: "Heading 2", detail: "Medium section heading", icon: "format_h2", keywords: "h2 subtitle" },
-  { id: "heading3", label: "Heading 3", detail: "Small section heading", icon: "format_h3", keywords: "h3 subtitle" },
-  { id: "heading4", label: "Heading 4", detail: "Compact section heading", icon: "format_h4", keywords: "h4 subtitle" },
-  { id: "bullet", label: "Bulleted list", detail: "Start a simple list", icon: "format_list_bulleted", keywords: "unordered list" },
-  { id: "number", label: "Numbered list", detail: "Start an ordered list", icon: "format_list_numbered", keywords: "ordered list" },
-  { id: "checkbox", label: "Checkbox", detail: "Add a to-do item", icon: "check_box", keywords: "todo task" },
-  { id: "quote", label: "Block quote", detail: "Call out quoted text", icon: "format_quote", keywords: "blockquote" },
-  { id: "divider", label: "Divider", detail: "Separate sections", icon: "horizontal_rule", keywords: "rule line" },
-  { id: "codeblock", label: "Code block", detail: "Add fenced code", icon: "code_blocks", keywords: "fence pre" },
-  { id: "internal", label: "Internal note link", detail: "Link another note", icon: "account_tree", keywords: "wiki backlink" },
-  { id: "bold", label: "Bold", detail: "Make text strong", icon: "format_bold", keywords: "strong" },
-  { id: "italic", label: "Italic", detail: "Emphasize text", icon: "format_italic", keywords: "emphasis" },
-  { id: "underline", label: "Underline", detail: "Underline text", icon: "format_underlined", keywords: "u" },
-  { id: "strike", label: "Strikethrough", detail: "Strike text out", icon: "strikethrough_s", keywords: "delete" },
-  { id: "inlinecode", label: "Inline code", detail: "Format a code phrase", icon: "data_object", keywords: "code" },
-  { id: "link", label: "Web link", detail: "Add a labelled URL", icon: "link", keywords: "url hyperlink" },
+  { id: "heading1", kind: "insert", value: "# Heading 1", placeholder: "Heading 1", label: "Heading 1", detail: "Large section heading", icon: "format_h1", keywords: "h1 title" },
+  { id: "heading2", kind: "insert", value: "## Heading 2", placeholder: "Heading 2", label: "Heading 2", detail: "Medium section heading", icon: "format_h2", keywords: "h2 subtitle" },
+  { id: "heading3", kind: "insert", value: "### Heading 3", placeholder: "Heading 3", label: "Heading 3", detail: "Small section heading", icon: "format_h3", keywords: "h3 subtitle" },
+  { id: "heading4", kind: "insert", value: "#### Heading 4", placeholder: "Heading 4", label: "Heading 4", detail: "Compact section heading", icon: "format_h4", keywords: "h4 subtitle" },
+  { id: "bullet", kind: "insert", value: "- List item", placeholder: "List item", label: "Bulleted list", detail: "Start a simple list", icon: "format_list_bulleted", keywords: "unordered list" },
+  { id: "number", kind: "insert", value: "1. List item", placeholder: "List item", label: "Numbered list", detail: "Start an ordered list", icon: "format_list_numbered", keywords: "ordered list" },
+  { id: "checkbox", kind: "insert", value: "- [ ] To-do", placeholder: "To-do", label: "Checkbox", detail: "Add a to-do item", icon: "check_box", keywords: "todo task" },
+  { id: "quote", kind: "insert", value: "> Quote", placeholder: "Quote", label: "Block quote", detail: "Call out quoted text", icon: "format_quote", keywords: "blockquote" },
+  { id: "divider", kind: "insert", value: "---\n", label: "Divider", detail: "Separate sections", icon: "horizontal_rule", keywords: "rule line" },
+  { id: "codeblock", kind: "insert", value: "```\ncode\n```", placeholder: "code", label: "Code block", detail: "Add fenced code", icon: "code_blocks", keywords: "fence pre" },
+  { id: "internal", kind: "insert", value: "[[Note name]]", placeholder: "Note name", label: "Internal note link", detail: "Link another note", icon: "account_tree", keywords: "wiki backlink" },
+  { id: "bold", kind: "insert", value: "**bold text**", placeholder: "bold text", label: "Bold", detail: "Make text strong", icon: "format_bold", keywords: "strong" },
+  { id: "italic", kind: "insert", value: "*italic text*", placeholder: "italic text", label: "Italic", detail: "Emphasize text", icon: "format_italic", keywords: "emphasis" },
+  { id: "underline", kind: "insert", value: "<u>underlined text</u>", placeholder: "underlined text", label: "Underline", detail: "Underline text", icon: "format_underlined", keywords: "u" },
+  { id: "strike", kind: "insert", value: "~~struck text~~", placeholder: "struck text", label: "Strikethrough", detail: "Strike text out", icon: "strikethrough_s", keywords: "delete" },
+  { id: "inlinecode", kind: "insert", value: "`inline code`", placeholder: "inline code", label: "Inline code", detail: "Format a code phrase", icon: "data_object", keywords: "code" },
+  { id: "link", kind: "insert", value: "[link text](https://)", placeholder: "link text", label: "Web link", detail: "Add a labelled URL", icon: "link", keywords: "url hyperlink" },
+  { id: "subscript", kind: "insert", value: "<sub>subscript</sub>", placeholder: "subscript", label: "Subscript", detail: "Lower text for chemistry", icon: "subscript", keywords: "chemistry lower index" },
+  { id: "chem", kind: "insert", value: "$\\ce{H2O}$", placeholder: "H2O", label: "Chemistry formula", detail: "Format a chemical equation", icon: "science", keywords: "chem molecule equation mhchem" },
+  { id: "fraction", kind: "insert", value: "$\\frac{numerator}{denominator}$", placeholder: "numerator", label: "Math fraction", detail: "Insert a stacked fraction", icon: "function", keywords: "math latex divide numerator denominator" },
+  { id: "exponent", kind: "insert", value: "$base^{exponent}$", placeholder: "base", label: "Exponent", detail: "Type a base, then its exponent", icon: "superscript", keywords: "math power superscript squared cubed" },
+  { id: "image", kind: "image", label: "Image", detail: "Upload one or more images", icon: "add_photo_alternate", keywords: "photo picture upload paste" },
 ];
+
+const FORMATTING_GUIDE = [
+  {
+    id: "chemistry",
+    title: "Chemistry formulas",
+    icon: "science",
+    description: "Write familiar chemical notation and let Preview format element counts, charges, and reaction arrows.",
+    steps: "Type /chem, press Enter, then replace the selected H2O example with your formula.",
+    syntax: "$\\ce{H2SO4 + 2NaOH -> Na2SO4 + 2H2O}$",
+  },
+  {
+    id: "subscript",
+    title: "Subscript",
+    icon: "subscript",
+    description: "Lower any short piece of text, including numbers used outside a full chemistry formula.",
+    steps: "Type /subscript and replace the selected placeholder.",
+    syntax: "H<sub>2</sub>O",
+  },
+  {
+    id: "fractions",
+    title: "Fractions and inline math",
+    icon: "function",
+    description: "Use LaTeX between dollar signs for clean inline equations and stacked fractions.",
+    steps: "Type /fraction, replace numerator, then replace denominator.",
+    syntax: "$\\frac{1}{2}$",
+  },
+  {
+    id: "exponents",
+    title: "Exponents and powers",
+    icon: "superscript",
+    description: "Raise a number or symbol to a power with a clean superscript, including negative exponents.",
+    steps: "Type /exponent, enter the base, press Tab, then enter the exponent. Numeric forms such as 10^-2 also convert when you press Space.",
+    syntax: "$10^{-2}$",
+  },
+  {
+    id: "arrows",
+    title: "Smart arrows",
+    icon: "arrow_right_alt",
+    description: "Turn familiar keyboard arrow characters into clean typographic arrows in formatted Notes views.",
+    steps: "Type an arrow using hyphens, equals signs, and angle brackets. The Markdown source stays unchanged.",
+    syntax: "A -> B\nA --> B\nA <-> B\nA => B",
+  },
+  {
+    id: "images",
+    title: "Images",
+    icon: "image",
+    description: "Paste images directly on desktop, or use /image to choose files on desktop and Android.",
+    steps: "Paste or select PNG, JPEG, WebP, or GIF files. Images sync after upload and are removed when the note is deleted.",
+    syntax: "![Lab setup](image-url)",
+    previewSyntax: "![Committed image](/logo.png)",
+  },
+  {
+    id: "commands",
+    title: "Slash commands",
+    icon: "keyboard_command_key",
+    description: "Open formatting and media tools without leaving the keyboard.",
+    steps: "Start a line with /, type part of a command name, then press Enter or tap the result.",
+    syntax: "/subscript\n/chem\n/fraction\n/exponent\n/image",
+    commands: [
+      ["/subscript", "Insert lowered text"],
+      ["/chem", "Insert a chemical formula"],
+      ["/fraction", "Insert a stacked fraction"],
+      ["/exponent", "Insert a base and exponent"],
+      ["/image", "Open the image picker"],
+    ],
+  },
+] as const;
 
 const SHORTCUT_GROUPS = [
   {
@@ -101,6 +187,16 @@ const SHORTCUT_GROUPS = [
       ["~~text~~", "Strikethrough"],
       ["`text`", "Inline code"],
       ["[text](url)", "Link"],
+      ["<sub>2</sub>", "Subscript"],
+      ["$\\frac{1}{2}$", "Inline fraction"],
+      ["$10^{-2}$", "Exponent or power"],
+      ["10^-2 + Space", "Automatically format a numeric exponent"],
+      ["$\\ce{H2O}$", "Chemistry formula"],
+      ["![alt](url)", "Image"],
+      ["-> / -->", "Right arrow"],
+      ["<- / <--", "Left arrow"],
+      ["<-> / <=>", "Two-way arrow"],
+      ["=> / ==>", "Double right arrow"],
       ["/", "Open the slash command menu"],
     ],
   },
@@ -130,6 +226,23 @@ function slugFilename(title: string) {
 // explicit user actions, never as part of rendering.
 function actionTimestamp() {
   return Date.now();
+}
+
+function hasOddUnescapedMarker(value: string, marker: string) {
+  let count = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === marker && value[index - 1] !== "\\") count += 1;
+  }
+  return count % 2 === 1;
+}
+
+function isInsideFencedCode(content: string, position: number) {
+  const fenceCount = content
+    .slice(0, position)
+    .split("\n")
+    .filter((line) => line.trimStart().startsWith("```"))
+    .length;
+  return fenceCount % 2 === 1;
 }
 
 function matchesNote(note: MarkdownNote, query: string) {
@@ -194,7 +307,10 @@ export default function NotesPage() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [notePendingDelete, setNotePendingDelete] = useState<MarkdownNote | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("write");
+  const [formattedPreviewOpen, setFormattedPreviewOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(282);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [calendars, setCalendars] = useState<SyncedGoogleCalendar[]>([]);
   const [slashRange, setSlashRange] = useState<{ start: number; end: number; query: string } | null>(null);
   const [linkRange, setLinkRange] = useState<{ start: number; end: number; query: string } | null>(null);
@@ -202,11 +318,26 @@ export default function NotesPage() {
   const [menuIndex, setMenuIndex] = useState(0);
   const [importTargetId, setImportTargetId] = useState("");
   const [saveState, setSaveState] = useState<"saved" | "saving" | "error">("saved");
+  const [imageUploadNotice, setImageUploadNotice] = useState<{ message: string; error?: boolean } | null>(null);
+  const [copiedGuideId, setCopiedGuideId] = useState<string | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const documentScrollRef = useRef<HTMLDivElement>(null);
+  const livePreviewScrollRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const initializedForUserRef = useRef<string | null>(null);
   const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const lastFolderLabelClickRef = useRef<{ folderId: string; timestamp: number } | null>(null);
+  const notesRef = useRef<MarkdownNote[]>([]);
+  const uploadNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sidebarPreferencesLoadedRef = useRef(false);
+  const restoredLastNoteForUserRef = useRef<string | null>(null);
+
+  const showImageNotice = useCallback((message: string, error = false) => {
+    if (uploadNoticeTimerRef.current) clearTimeout(uploadNoticeTimerRef.current);
+    setImageUploadNotice({ message, error });
+    uploadNoticeTimerRef.current = setTimeout(() => setImageUploadNotice(null), error ? 5_000 : 2_500);
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -216,6 +347,7 @@ export default function NotesPage() {
       setFoldersLoaded(true);
     });
     const unsubscribeNotes = subscribeToMarkdownNotes(user.uid, (nextNotes) => {
+      notesRef.current = nextNotes;
       setNotes(nextNotes);
       setNotesLoaded(true);
     });
@@ -249,6 +381,56 @@ export default function NotesPage() {
       saveTimers.clear();
     };
   }, [user]);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => () => {
+    if (uploadNoticeTimerRef.current) clearTimeout(uploadNoticeTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    const savedWidth = Number(window.localStorage.getItem(NOTES_SIDEBAR_WIDTH_KEY));
+    const savedCollapsed = window.localStorage.getItem(NOTES_SIDEBAR_COLLAPSED_KEY) === "true";
+    const frame = window.requestAnimationFrame(() => {
+      sidebarPreferencesLoadedRef.current = true;
+      if (Number.isFinite(savedWidth) && savedWidth >= NOTES_SIDEBAR_MIN_WIDTH && savedWidth <= NOTES_SIDEBAR_MAX_WIDTH) {
+        setSidebarWidth(savedWidth);
+      }
+      setSidebarCollapsed(savedCollapsed);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarPreferencesLoadedRef.current) return;
+    window.localStorage.setItem(NOTES_SIDEBAR_WIDTH_KEY, String(sidebarWidth));
+    window.localStorage.setItem(NOTES_SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed, sidebarWidth]);
+
+  const beginSidebarResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "touch") return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    document.body.classList.add("notes-sidebar-resizing");
+
+    const resize = (moveEvent: PointerEvent) => {
+      const nextWidth = Math.min(NOTES_SIDEBAR_MAX_WIDTH, Math.max(NOTES_SIDEBAR_MIN_WIDTH, startWidth + moveEvent.clientX - startX));
+      setSidebarWidth(Math.round(nextWidth));
+    };
+    const stopResize = () => {
+      document.body.classList.remove("notes-sidebar-resizing");
+      window.removeEventListener("pointermove", resize);
+      window.removeEventListener("pointerup", stopResize);
+      window.removeEventListener("pointercancel", stopResize);
+    };
+
+    window.addEventListener("pointermove", resize);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
+  };
 
   useEffect(() => {
     if (!user || !foldersLoaded || !notesLoaded || folders.length > 0 || initializedForUserRef.current === user.uid) return;
@@ -323,6 +505,35 @@ export default function NotesPage() {
   const effectiveFolderId = selectedFolderId ?? activeNote?.folderId ?? notebooks[0]?.id ?? null;
   const activeFolder = effectiveFolderId ? folderMap.get(effectiveFolderId) ?? null : null;
   const calendarMap = useMemo(() => new Map(calendars.map((calendar) => [calendar.id, calendar])), [calendars]);
+  const activeNoteHeadings = useMemo(() => collectMarkdownHeadings(activeNote?.content ?? "", "notes-active"), [activeNote?.content]);
+
+  useEffect(() => {
+    if (!user || !foldersLoaded || !notesLoaded || !notes.length || restoredLastNoteForUserRef.current === user.uid) return;
+    const savedNoteId = window.localStorage.getItem(`${NOTES_LAST_OPENED_KEY_PREFIX}${user.uid}`);
+    const noteToRestore = notes.find((note) => note.id === savedNoteId) ?? notes[0];
+    const frame = window.requestAnimationFrame(() => {
+      restoredLastNoteForUserRef.current = user.uid;
+      setSelectedNoteId(noteToRestore.id);
+      setSelectedFolderId(noteToRestore.folderId);
+      setExpandedIds((current) => {
+        const next = new Set(current);
+        let parent = folderMap.get(noteToRestore.folderId);
+        while (parent) {
+          next.add(parent.id);
+          parent = parent.parentId ? folderMap.get(parent.parentId) : undefined;
+        }
+        return next;
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [folderMap, foldersLoaded, notes, notesLoaded, user]);
+
+  useEffect(() => {
+    if (!user || !selectedNoteId) return;
+    const selectedNote = notes.find((note) => note.id === selectedNoteId);
+    if (selectedNote?.userId !== user.uid) return;
+    window.localStorage.setItem(`${NOTES_LAST_OPENED_KEY_PREFIX}${user.uid}`, selectedNoteId);
+  }, [notes, selectedNoteId, user]);
 
   const scheduleSave = useCallback((note: MarkdownNote) => {
     const previousTimer = saveTimersRef.current.get(note.id);
@@ -340,6 +551,7 @@ export default function NotesPage() {
   const updateActiveNote = useCallback((patch: Partial<MarkdownNote>) => {
     if (!activeNote) return;
     const nextNote = { ...activeNote, ...patch, updatedAt: actionTimestamp() };
+    notesRef.current = notesRef.current.map((note) => note.id === nextNote.id ? nextNote : note);
     setNotes((current) => current.map((note) => note.id === nextNote.id ? nextNote : note));
     scheduleSave(nextNote);
   }, [activeNote, scheduleSave]);
@@ -472,16 +684,24 @@ export default function NotesPage() {
 
   const confirmDeleteNote = async () => {
     if (!notePendingDelete) return;
-    const noteId = notePendingDelete.id;
+    const deletedNote = notePendingDelete;
+    const noteId = deletedNote.id;
     const nextSelection = notes.find((note) => note.id !== noteId)?.id ?? null;
     setNotePendingDelete(null);
+    notesRef.current = notesRef.current.filter((note) => note.id !== noteId);
     setNotes((current) => current.filter((note) => note.id !== noteId));
     setSelectedNoteId(nextSelection);
     setPageMenuOpen(false);
     setSaveState("saving");
-    await deleteMarkdownNote(noteId)
-      .then(() => setSaveState("saved"))
-      .catch(() => setSaveState("error"));
+    try {
+      await deleteMarkdownNote(noteId);
+      setSaveState("saved");
+      void deleteNoteImages(deletedNote.userId, noteId).catch(() => {
+        showImageNotice("The note was deleted, but some stored images could not be cleaned up.", true);
+      });
+    } catch {
+      setSaveState("error");
+    }
   };
 
   const importMarkdown = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -543,27 +763,90 @@ export default function NotesPage() {
     replaceEditorRange(start, end, `${prefix}${inner}${suffix}`, prefix.length, prefix.length + inner.length);
   }, [activeNote, replaceEditorRange]);
 
-  const commandOutput = (commandId: string) => {
-    const outputs: Record<string, { value: string; start: number; end?: number }> = {
-      heading1: { value: "# Heading 1", start: 2, end: 11 },
-      heading2: { value: "## Heading 2", start: 3, end: 12 },
-      heading3: { value: "### Heading 3", start: 4, end: 13 },
-      heading4: { value: "#### Heading 4", start: 5, end: 14 },
-      bullet: { value: "- List item", start: 2, end: 11 },
-      number: { value: "1. List item", start: 3, end: 12 },
-      checkbox: { value: "- [ ] To-do", start: 6, end: 11 },
-      quote: { value: "> Quote", start: 2, end: 7 },
-      divider: { value: "---\n", start: 4 },
-      codeblock: { value: "```\ncode\n```", start: 4, end: 8 },
-      internal: { value: "[[Note name]]", start: 2, end: 11 },
-      bold: { value: "**bold text**", start: 2, end: 11 },
-      italic: { value: "*italic text*", start: 1, end: 12 },
-      underline: { value: "<u>underlined text</u>", start: 3, end: 18 },
-      strike: { value: "~~struck text~~", start: 2, end: 13 },
-      inlinecode: { value: "`inline code`", start: 1, end: 12 },
-      link: { value: "[link text](https://)", start: 1, end: 10 },
-    };
-    return outputs[commandId];
+  const replaceUploadToken = useCallback((noteId: string, token: string, replacement: string) => {
+    const note = notesRef.current.find((item) => item.id === noteId);
+    if (!note || !note.content.includes(token)) return;
+    const next = { ...note, content: note.content.replace(token, replacement), updatedAt: actionTimestamp() };
+    notesRef.current = notesRef.current.map((item) => item.id === noteId ? next : item);
+    setNotes(notesRef.current);
+    scheduleSave(next);
+  }, [scheduleSave]);
+
+  const insertImageFiles = useCallback(async (files: File[], start?: number, end?: number) => {
+    if (!activeNote || !user || !files.length) return;
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) {
+      showImageNotice("Choose a PNG, JPEG, WebP, or GIF image.", true);
+      return;
+    }
+
+    const noteAtStart = activeNote;
+    const rangeStart = start ?? editorRef.current?.selectionStart ?? noteAtStart.content.length;
+    const rangeEnd = end ?? editorRef.current?.selectionEnd ?? rangeStart;
+    const uploads = imageFiles.map((file) => {
+      const uploadId = generateNotesId();
+      const alt = (file.name || "Pasted image").replace(/[\[\]()]/g, " ").replace(/\s+/g, " ").trim();
+      return { file, token: `![Uploading ${alt}…](note-upload://${uploadId})` };
+    });
+    const leadingBreak = rangeStart > 0 && noteAtStart.content[rangeStart - 1] !== "\n" ? "\n" : "";
+    const trailingBreak = rangeEnd < noteAtStart.content.length && noteAtStart.content[rangeEnd] !== "\n" ? "\n" : "";
+    const insertion = `${leadingBreak}${uploads.map((upload) => upload.token).join("\n")}${trailingBreak}`;
+    replaceEditorRange(rangeStart, rangeEnd, insertion, insertion.length);
+
+    const progress = uploads.map(() => 0);
+    setImageUploadNotice({ message: `Uploading ${uploads.length === 1 ? "image" : `${uploads.length} images`}… 0%` });
+    const results = await Promise.allSettled(uploads.map(async (upload, index) => {
+      const uploaded = await uploadNoteImage(user.uid, noteAtStart.id, upload.file, (percent) => {
+        progress[index] = percent;
+        const overall = Math.round(progress.reduce((sum, value) => sum + value, 0) / progress.length);
+        setImageUploadNotice({ message: `Uploading ${uploads.length === 1 ? "image" : `${uploads.length} images`}… ${overall}%` });
+      });
+      replaceUploadToken(noteAtStart.id, upload.token, `![${uploaded.altText}](${uploaded.downloadUrl})`);
+    }));
+
+    const failed = results.filter((result) => result.status === "rejected").length;
+    uploads.forEach((upload, index) => {
+      if (results[index].status === "rejected") replaceUploadToken(noteAtStart.id, upload.token, "");
+    });
+    if (failed) {
+      const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      const reason = firstFailure?.reason instanceof Error ? firstFailure.reason.message : "The upload failed.";
+      showImageNotice(`${failed} image${failed === 1 ? "" : "s"} could not be added. ${reason}`, true);
+    } else {
+      showImageNotice(`${uploads.length} image${uploads.length === 1 ? "" : "s"} added.`);
+    }
+  }, [activeNote, replaceEditorRange, replaceUploadToken, showImageNotice, user]);
+
+  const handleEditorPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (!files.length) return;
+    event.preventDefault();
+    void insertImageFiles(files, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+  };
+
+  const handleImageInput = (event: ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files?.length) void insertImageFiles(Array.from(event.target.files));
+    event.target.value = "";
+  };
+
+  const copyGuideSyntax = async (id: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const fallback = document.createElement("textarea");
+      fallback.value = value;
+      fallback.style.position = "fixed";
+      fallback.style.opacity = "0";
+      document.body.appendChild(fallback);
+      fallback.select();
+      document.execCommand("copy");
+      fallback.remove();
+    }
+    setCopiedGuideId(id);
+    window.setTimeout(() => setCopiedGuideId((current) => current === id ? null : current), 1_700);
   };
 
   const filteredCommands = useMemo(() => {
@@ -577,9 +860,14 @@ export default function NotesPage() {
 
   const executeSlashCommand = (command: SlashCommand | undefined) => {
     if (!command || !slashRange) return;
-    const output = commandOutput(command.id);
-    if (!output) return;
-    replaceEditorRange(slashRange.start, slashRange.end, output.value, output.start, output.end);
+    if (command.kind === "image") {
+      replaceEditorRange(slashRange.start, slashRange.end, "", 0);
+      window.setTimeout(() => imageInputRef.current?.click(), 0);
+      return;
+    }
+    const placeholderStart = command.placeholder ? command.value.indexOf(command.placeholder) : command.value.length;
+    const selectionStart = placeholderStart >= 0 ? placeholderStart : command.value.length;
+    replaceEditorRange(slashRange.start, slashRange.end, command.value, selectionStart, selectionStart + (command.placeholder?.length ?? 0));
   };
 
   const selectInternalLink = (note: MarkdownNote) => {
@@ -655,8 +943,28 @@ export default function NotesPage() {
     const currentLine = activeNote.content.slice(lineStart, start);
     if (event.key === "Tab") {
       event.preventDefault();
+      if (start === end && activeNote.content.slice(start).startsWith("^{exponent}$")) {
+        textarea.setSelectionRange(start + 2, start + 10);
+        return;
+      }
       replaceEditorRange(start, end, "  ", 2);
       return;
+    }
+    if (event.key === " " && start === end) {
+      const exponentMatch = currentLine.match(/(^|[\s(])(\d+(?:\.\d+)?)\^([+-]?\d+(?:\.\d+)?)$/);
+      if (exponentMatch) {
+        const tokenOffset = (exponentMatch.index ?? 0) + exponentMatch[1].length;
+        const tokenStart = lineStart + tokenOffset;
+        const inlinePrefix = currentLine.slice(0, tokenOffset);
+        const insideInlineCode = hasOddUnescapedMarker(inlinePrefix, "`");
+        const insideInlineMath = hasOddUnescapedMarker(inlinePrefix, "$");
+        if (!insideInlineCode && !insideInlineMath && !isInsideFencedCode(activeNote.content, tokenStart)) {
+          event.preventDefault();
+          const formatted = `$${exponentMatch[2]}^{${exponentMatch[3]}}$ `;
+          replaceEditorRange(tokenStart, start, formatted, formatted.length);
+          return;
+        }
+      }
     }
     if (event.key === " " && /^(\[\]|\[ \])$/.test(currentLine)) {
       event.preventDefault();
@@ -808,10 +1116,16 @@ export default function NotesPage() {
     </div>;
   };
 
-  return <div className="notes-workspace">
+  return <div
+    className={`notes-workspace${sidebarCollapsed ? " is-sidebar-collapsed" : ""}`}
+    style={{ "--notes-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+  >
     <aside className={`notes-sidebar ${sidebarOpen ? "is-open" : ""}`}>
       <div className="notes-sidebar-header">
-        <div className="notes-sidebar-brand"><div><strong>Notes</strong><span>Markdown workspace</span></div></div>
+        <div className="notes-sidebar-brand">
+          <div><strong>Notes</strong><span>Markdown workspace</span></div>
+          <button type="button" className="notes-sidebar-collapse" aria-label="Collapse notes navigation" title="Collapse sidebar" onClick={() => setSidebarCollapsed(true)}>{icon("left_panel_close", 18)}</button>
+        </div>
         <button type="button" className="notes-mobile-close" aria-label="Close notes navigation" onClick={() => setSidebarOpen(false)}>{icon("close")}</button>
         <label className="notes-sidebar-search">
           {icon("search", 18)}
@@ -840,12 +1154,13 @@ export default function NotesPage() {
         <button type="button" onClick={() => setSettingsOpen(true)}>{icon("settings", 19)}<span>Notes settings</span></button>
         <span className={`notes-save-state is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "error" ? "Save failed" : "All changes saved"}</span>
       </div>
+      <button type="button" className="notes-sidebar-resizer" aria-label="Resize notes navigation" title="Drag to resize sidebar" onPointerDown={beginSidebarResize} />
     </aside>
 
     <main className="notes-editor-shell">
       <header className="notes-editor-toolbar">
         <div className="notes-editor-toolbar-left">
-          <button type="button" className="notes-mobile-sidebar" aria-label="Open notes navigation" onClick={() => setSidebarOpen(true)}>{icon("dock_to_right", 20)}</button>
+          <button type="button" className="notes-mobile-sidebar" aria-label="Open notes navigation" onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}>{icon("dock_to_right", 20)}</button>
           <div className="notes-breadcrumb">
             {activeNote ? <><span>{folderMap.get(activeNote.notebookId)?.name ?? "Notes"}</span>{activeNote.folderId !== activeNote.notebookId && <>{icon("chevron_right", 15)}<span>{folderMap.get(activeNote.folderId)?.name}</span></>}</> : <span>Notes</span>}
           </div>
@@ -855,6 +1170,14 @@ export default function NotesPage() {
             <button type="button" className={editorMode === "write" ? "is-active" : ""} onClick={() => setEditorMode("write")}>{icon("edit_note", 17)} Write</button>
             <button type="button" className={editorMode === "preview" ? "is-active" : ""} onClick={() => setEditorMode("preview")}>{icon("visibility", 17)} Preview</button>
           </div>
+          {editorMode === "write" && <button
+            type="button"
+            className={`notes-live-preview-toggle${formattedPreviewOpen ? " is-active" : ""}`}
+            aria-label={formattedPreviewOpen ? "Close formatted preview" : "Open formatted preview"}
+            aria-pressed={formattedPreviewOpen}
+            title={formattedPreviewOpen ? "Close formatted preview" : "Open formatted preview"}
+            onClick={() => setFormattedPreviewOpen((open) => !open)}
+          >{icon("vertical_split", 19)}</button>}
           <button type="button" className="notes-toolbar-search" onClick={() => setSearchOpen(true)} title="Global search (Ctrl + S)">{icon("search", 19)}</button>
           <div className="notes-page-menu-wrap">
             <button type="button" className="notes-page-menu-trigger" aria-label="Page options" onClick={() => setPageMenuOpen((open) => !open)}>{icon("more_horiz", 21)}</button>
@@ -866,8 +1189,8 @@ export default function NotesPage() {
         </div>
       </header>
 
-      {activeNote ? <div className="notes-document-scroll">
-        <article className="notes-document">
+      {activeNote ? <div className={`notes-document-scroll${editorMode === "preview" ? " has-fast-scroll" : ""}`} id="notes-document-scroll" ref={documentScrollRef}>
+        <article className={`notes-document${editorMode === "write" ? ` is-writing${formattedPreviewOpen ? "" : " is-formatted-preview-closed"}` : ""}`}>
           <textarea
             className="notes-title-input"
             rows={1}
@@ -897,23 +1220,43 @@ export default function NotesPage() {
               <button type="button" onClick={() => wrapSelection("`", "`", "inline code")} title="Inline code">{icon("data_object", 18)}</button>
               <button type="button" onClick={() => wrapSelection("[", "](https://)", "link text")} title="Link">{icon("link", 18)}</button>
             </div>
-            <textarea
-              ref={editorRef}
-              className="notes-markdown-editor"
-              value={activeNote.content}
-              onChange={handleEditorChange}
-              onKeyDown={handleEditorKeyDown}
-              onClick={(event) => refreshFloatingMenu(event.currentTarget)}
-              placeholder={'Start writing…\n\nType "/" for commands or "[[" to link a note.'}
-              spellCheck
-              aria-label="Markdown note content"
-            />
-          </div> : <NotesMarkdown content={activeNote.content} />}
+            <div className={`notes-compose-grid${formattedPreviewOpen ? "" : " is-preview-closed"}`}>
+              <div className="notes-source-pane">
+                <div className="notes-pane-label"><span>Source</span><small>Keep typing—formatting updates live</small></div>
+                <textarea
+                  ref={editorRef}
+                  className="notes-markdown-editor"
+                  value={activeNote.content}
+                  onChange={handleEditorChange}
+                  onKeyDown={handleEditorKeyDown}
+                  onPaste={handleEditorPaste}
+                  onClick={(event) => refreshFloatingMenu(event.currentTarget)}
+                  placeholder={'Start writing…\n\nType "/" for commands or "[[" to link a note.'}
+                  spellCheck
+                  aria-label="Markdown note content"
+                />
+              </div>
+              {formattedPreviewOpen && <aside className="notes-live-preview has-fast-scroll" id="notes-live-preview-scroll" ref={livePreviewScrollRef} aria-label="Live formatted preview">
+                <div className="notes-live-preview-heading"><small>Formatted preview</small></div>
+                {activeNote.content.trim()
+                  ? <NotesMarkdown content={activeNote.content} headingIdPrefix="notes-active" />
+                  : <p className="notes-live-preview-empty">Your formulas, fractions, chemistry, and formatting will appear here as you type.</p>}
+              </aside>}
+            </div>
+            <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={handleImageInput} />
+          </div> : <NotesMarkdown content={activeNote.content} headingIdPrefix="notes-active" />}
         </article>
       </div> : <div className="notes-empty-editor">
         <div>{icon("edit_note", 34)}</div><h1>{notesLoaded ? "Choose a note" : "Opening your notes…"}</h1><p>Select a page from the sidebar or start something new.</p><button type="button" onClick={() => createNote()}>{icon("add", 18)} New note</button>
       </div>}
+      {activeNote && (editorMode === "preview" || formattedPreviewOpen) && <NotesFastScroll
+        headings={activeNoteHeadings}
+        scrollContainerRef={editorMode === "preview" ? documentScrollRef : livePreviewScrollRef}
+        scrollContainerId={editorMode === "preview" ? "notes-document-scroll" : "notes-live-preview-scroll"}
+      />}
     </main>
+
+    {imageUploadNotice && <div className={`notes-upload-notice${imageUploadNotice.error ? " is-error" : ""}`} role="status">{imageUploadNotice.message}</div>}
 
     {sidebarOpen && <button className="notes-sidebar-scrim" aria-label="Close notes navigation" onClick={() => setSidebarOpen(false)} />}
 
@@ -924,7 +1267,7 @@ export default function NotesPage() {
           type="button"
           key={command.id}
           className={index === menuIndex ? "is-active" : ""}
-          onMouseDown={(event: ReactMouseEvent) => { event.preventDefault(); executeSlashCommand(command); }}
+          onPointerDown={(event) => { event.preventDefault(); executeSlashCommand(command); }}
           onMouseEnter={() => setMenuIndex(index)}
         ><span className="notes-command-icon">{icon(command.icon, 20)}</span><span><strong>{command.label}</strong><small>{command.detail}</small></span></button>)}
         {!filteredCommands.length && <p className="notes-command-empty">No commands match “{slashRange.query}”</p>}
@@ -938,7 +1281,7 @@ export default function NotesPage() {
           type="button"
           key={note.id}
           className={index === menuIndex ? "is-active" : ""}
-          onMouseDown={(event: ReactMouseEvent) => { event.preventDefault(); selectInternalLink(note); }}
+          onPointerDown={(event) => { event.preventDefault(); selectInternalLink(note); }}
           onMouseEnter={() => setMenuIndex(index)}
         ><span className="notes-command-icon">{icon("description", 19)}</span><span><strong>{note.title}</strong><small>{contextSnippet(note.content, linkRange.query)}</small></span></button>)}
         {!linkResults.length && <p className="notes-command-empty">No other notes found</p>}
@@ -999,6 +1342,27 @@ export default function NotesPage() {
               </label>)}
               {!calendars.length && <p className="notes-calendar-empty">No synced calendar layers found. Connect Google Calendar from the Calendar page, then return here.</p>}
             </div>
+          </section>
+
+          <section className="notes-settings-section notes-guide-section">
+            <div className="notes-settings-heading"><div><h3>Formatting &amp; Media Guide</h3><p>Copy working examples for chemistry, math, subscripts, images, and slash commands.</p></div>{icon("menu_book", 23)}</div>
+            <div className="notes-guide-grid">
+              {FORMATTING_GUIDE.map((guide) => <article className="notes-guide-card" key={guide.id}>
+                <header><span>{icon(guide.icon, 20)}</span><div><h4>{guide.title}</h4><p>{guide.description}</p></div></header>
+                <div className="notes-guide-steps"><strong>How to use it</strong><p>{guide.steps}</p></div>
+                <div className="notes-guide-code">
+                  <pre><code>{guide.syntax}</code></pre>
+                  <button type="button" onClick={() => void copyGuideSyntax(guide.id, guide.syntax)}>{icon(copiedGuideId === guide.id ? "check" : "content_copy", 16)}{copiedGuideId === guide.id ? "Copied" : "Copy"}</button>
+                </div>
+                <div className="notes-guide-preview">
+                  <span>Preview</span>
+                  {"commands" in guide
+                    ? <div className="notes-guide-command-list">{guide.commands.map(([command, detail]) => <div key={command}><code>{command}</code><small>{detail}</small></div>)}</div>
+                    : <NotesMarkdown content={("previewSyntax" in guide ? guide.previewSyntax : guide.syntax)} />}
+                </div>
+              </article>)}
+            </div>
+            <p className="notes-guide-footnote">Pasted images are compressed and synced through your account. PNG, JPEG, WebP, and GIF are supported up to 5 MB after processing. On Android, use <code>/image</code> whenever the keyboard does not expose an image from the clipboard. Image files remain available when their Markdown is removed, and are cleaned up when the note is deleted.</p>
           </section>
 
           <section className="notes-settings-section notes-shortcuts-section">

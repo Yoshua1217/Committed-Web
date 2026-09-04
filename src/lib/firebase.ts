@@ -6,6 +6,7 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDQvaF2LF8NzAWpKU_JfcUN9dsXL_PBsJk",
@@ -37,4 +38,5 @@ function getConfiguredFirestore(): Firestore {
 export const auth = getAuth(app);
 export const db = getConfiguredFirestore();
 export const functions = getFunctions(app);
+export const storage = getStorage(app);
 export default app;
