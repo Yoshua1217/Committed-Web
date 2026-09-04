@@ -19,8 +19,13 @@ function taskFromFirestore(id: string, data: Record<string, unknown>): Task {
     type: (data.type as "todo" | "task") ?? "todo",
     title: (data.title as string) ?? "",
     description: (data.description as string) ?? "",
+    priority: (data.priority as Task["priority"]) ?? "medium",
     goalId: (data.goalId as string) ?? "",
     dueDate: (data.dueDate as string) ?? null,
+    startDateTime: (data.startDateTime as string) ?? null,
+    dueDateTime: (data.dueDateTime as string) ?? null,
+    startAllDay: Boolean(data.startAllDay ?? data.allDay ?? false),
+    dueAllDay: Boolean(data.dueAllDay ?? data.allDay ?? false),
     notificationDateTime: (data.notificationDateTime as string) ?? null,
     completed: Boolean(data.completed ?? false),
     completedAt: data.completedAt != null ? Number(data.completedAt) : null,
@@ -36,8 +41,7 @@ export function subscribeToTasks(
 ): () => void {
   const q = query(
     collection(db, COLLECTION_NAME),
-    where("userId", "==", userId),
-    where("archived", "==", false)
+    where("userId", "==", userId)
   );
 
   return onSnapshot(
@@ -61,8 +65,13 @@ export async function saveTask(task: Task): Promise<void> {
     type: task.type,
     title: task.title,
     description: task.description,
+    priority: task.priority,
     goalId: task.goalId,
     dueDate: task.dueDate,
+    startDateTime: task.startDateTime,
+    dueDateTime: task.dueDateTime,
+    startAllDay: task.startAllDay,
+    dueAllDay: task.dueAllDay,
     notificationDateTime: task.notificationDateTime,
     completed: task.completed,
     completedAt: task.completedAt,

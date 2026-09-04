@@ -1,6 +1,10 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  type Firestore,
+} from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
@@ -12,9 +16,25 @@ const firebaseConfig = {
   appId: "1:164172002698:web:b33b8e7df21fff9c954473",
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+const existingApp = getApps().find((candidate) => candidate.name === "[DEFAULT]");
+const app = existingApp ?? initializeApp(firebaseConfig);
+
+function getConfiguredFirestore(): Firestore {
+  // Firestore's streaming transport can repeatedly fail behind QUIC-hostile
+  // networks, proxies, and VPNs. Long polling uses ordinary HTTPS requests and
+  // lets the SDK reconnect cleanly when the browser reports a network change.
+  if (typeof window !== "undefined" && !existingApp) {
+    return initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+    });
+  }
+
+  // Reuse the existing instance during SSR and Fast Refresh. Calling
+  // initializeFirestore twice for the same app would throw.
+  return getFirestore(app);
+}
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db = getConfiguredFirestore();
 export const functions = getFunctions(app);
 export default app;

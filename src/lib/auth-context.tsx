@@ -19,6 +19,7 @@ import { FirebaseAuthentication } from "@capacitor-firebase/authentication";
 import firebaseApp, { auth } from "./firebase";
 
 export const GOOGLE_CALENDAR_READONLY_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+export const GOOGLE_CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
 interface AuthContextType {
   user: User | null;
@@ -83,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // This flow returns a fresh scoped Calendar token for an already
         // authorized account, so refresh works after an app restart.
         useCredentialManager: false,
-        scopes: [GOOGLE_CALENDAR_READONLY_SCOPE],
+        scopes: [GOOGLE_CALENDAR_READONLY_SCOPE, GOOGLE_CALENDAR_EVENTS_SCOPE],
       });
       const accessToken = result.credential?.accessToken;
       if (!accessToken) throw new Error("Google did not return Calendar access.");
@@ -96,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const calendarAuth = getAuth(calendarApp);
     const provider = new GoogleAuthProvider();
     provider.addScope(GOOGLE_CALENDAR_READONLY_SCOPE);
+    provider.addScope(GOOGLE_CALENDAR_EVENTS_SCOPE);
 
     try {
       const result = await signInWithPopup(calendarAuth, provider);

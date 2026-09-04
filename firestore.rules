@@ -40,6 +40,24 @@ service cloud.firestore {
       allow update: if isOwner(resource.data) && isOwner(request.resource.data);
     }
 
+    match /ideas/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /note_folders/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
+    match /notes/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
     // Completion queries are scoped by userId. The referenced habit must also
     // belong to that user so a completion cannot be attached to another account.
     match /habit_completions/{documentId} {

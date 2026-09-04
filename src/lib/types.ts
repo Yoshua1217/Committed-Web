@@ -54,14 +54,32 @@ export interface HabitCompletion {
   userId: string;
 }
 
+export interface Idea {
+  id: string;
+  userId: string;
+  text: string;
+  starred: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Task {
   id: string;
   userId: string;
   type: "todo" | "task";
   title: string;
   description: string;
+  priority: "low" | "medium" | "high" | "critical";
   goalId: string;
   dueDate: string | null; // "YYYY-MM-DD"
+  /** Local date and time selected for beginning the task: "YYYY-MM-DDTHH:mm". */
+  startDateTime: string | null;
+  /** Local date and time selected for completing the task: "YYYY-MM-DDTHH:mm". */
+  dueDateTime: string | null;
+  /** Whether the start date represents a full-day schedule. */
+  startAllDay: boolean;
+  /** Whether the due date represents a full-day schedule. */
+  dueAllDay: boolean;
   notificationDateTime: string | null; // "YYYY-MM-DDTHH:mm"
   completed: boolean;
   completedAt: number | null;

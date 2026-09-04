@@ -1,435 +1,74 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { Task, Goal } from "@/lib/types";
-import { subscribeToTasks, saveTask, deleteTask, completeTask, uncompleteTask } from "@/lib/tasks-service";
+import { Bucket, Goal, Task } from "@/lib/types";
+import { completeTask, deleteTask, saveTask, subscribeToTasks, uncompleteTask } from "@/lib/tasks-service";
 import { subscribeToGoals } from "@/lib/goals-service";
+import { subscribeToBuckets } from "@/lib/buckets-service";
+import { resolveIconName } from "@/lib/icons";
 import TaskEditModal from "@/components/task-edit-modal";
+import TaskDetailsModal from "@/components/task-details-modal";
+
+type TaskTab = "list" | "history";
+const priorityMeta: Record<Task["priority"], { label: string; color: string; rank: number }> = {
+  critical: { label: "Critical", color: "#dd5252", rank: 0 }, high: { label: "High", color: "#e69b25", rank: 1 }, medium: { label: "Medium", color: "#4f8cff", rank: 2 }, low: { label: "Low", color: "#36a269", rank: 3 },
+};
+const primaryButton: React.CSSProperties = { background: "var(--primary)", color: "var(--background)", border: "none", borderRadius: 14, padding: "11px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700 };
+const shell: React.CSSProperties = { padding: "4px 12px", border: "1px solid var(--border)", borderRadius: 16, background: "var(--surface-variant)" };
 
 export default function TasksPage() {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [showCompleted, setShowCompleted] = useState(false);
-  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!user) return;
-    const unsub1 = subscribeToTasks(user.uid, (t) => {
-      setTasks(t);
-      setLoading(false);
-    });
-    const unsub2 = subscribeToGoals(user.uid, setGoals);
-    return () => {
-      unsub1();
-      unsub2();
-    };
-  }, [user]);
-
-  const todos = tasks.filter((t) => t.type === "todo" && !t.completed);
-  const activeTasks = tasks.filter((t) => t.type === "task" && !t.completed);
-  const completedTasks = tasks.filter((t) => t.type === "task" && t.completed);
-
-  const today = new Date().toISOString().split("T")[0];
-
-  const handleComplete = useCallback(async (t: Task) => {
-    setCompletingIds((prev) => new Set(prev).add(t.id));
-    // Small delay for visual feedback before archiving todos
-    setTimeout(async () => {
-      await completeTask(t);
-      setCompletingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(t.id);
-        return next;
-      });
-    }, t.type === "todo" ? 400 : 0);
-  }, []);
-
-  const handleSave = useCallback(async (t: Task) => {
-    await saveTask(t);
-  }, []);
-
-  const handleDelete = useCallback(async (id: string) => {
-    await deleteTask(id);
-  }, []);
-
-  const nextSortOrder = tasks.length;
-
-  const goalName = (id: string) => goals.find((g) => g.id === id)?.name ?? "";
-
-  if (loading) {
-    return (
-      <div style={{ padding: 32 }}>
-        <p style={{ color: "var(--secondary)", fontSize: 14 }}>Loading...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ padding: "32px 28px", maxWidth: 720, width: "100%" }}>
-      {/* Header */}
-      <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: "var(--primary)", margin: 0 }}>
-          Tasks
-        </h1>
-        <button
-          onClick={() => {
-            setEditingTask(null);
-            setModalOpen(true);
-          }}
-          className="flex items-center gap-2"
-          style={{
-            padding: "10px 20px",
-            borderRadius: 14,
-            backgroundColor: "var(--primary)",
-            color: "var(--background)",
-            border: "none",
-            cursor: "pointer",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          <span className="material-symbols-rounded" style={{ fontSize: 18 }}>add</span>
-          Add
-        </button>
-      </div>
-
-      {/* Quick To-Dos Section */}
-      <section style={{ marginBottom: 32 }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
-          <span className="material-symbols-rounded" style={{ fontSize: 20, color: "var(--secondary)" }}>
-            check_circle
-          </span>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--secondary)", margin: 0, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            To Do
-          </h2>
-          {todos.length > 0 && (
-            <span style={{
-              fontSize: 11, fontWeight: 700, backgroundColor: "var(--surface-variant)",
-              color: "var(--secondary)", padding: "2px 8px", borderRadius: 10,
-            }}>
-              {todos.length}
-            </span>
-          )}
-        </div>
-
-        {todos.length === 0 ? (
-          <div style={{
-            padding: "24px 20px",
-            borderRadius: 16,
-            border: "1px dashed var(--border)",
-            textAlign: "center",
-          }}>
-            <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>
-              No to-dos. Click Add to create one.
-            </p>
-          </div>
-        ) : (
-          <div style={{
-            borderRadius: 16,
-            border: "1px solid var(--border)",
-            backgroundColor: "var(--surface)",
-            overflow: "hidden",
-          }}>
-            {todos.map((todo, i) => {
-              const completing = completingIds.has(todo.id);
-              return (
-                <div
-                  key={todo.id}
-                  className="flex items-center gap-3"
-                  style={{
-                    padding: "14px 16px",
-                    borderBottom: i < todos.length - 1 ? "1px solid var(--border)" : "none",
-                    opacity: completing ? 0.3 : 1,
-                    transform: completing ? "translateX(20px)" : "none",
-                    transition: "all 0.35s ease",
-                  }}
-                >
-                  <button
-                    onClick={() => handleComplete(todo)}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: "50%",
-                      border: "2px solid var(--border)",
-                      background: "none",
-                      cursor: "pointer",
-                      flexShrink: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "all 0.15s",
-                    }}
-                  >
-                    {completing && (
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    )}
-                  </button>
-                  <span
-                    onClick={() => {
-                      setEditingTask(todo);
-                      setModalOpen(true);
-                    }}
-                    style={{
-                      fontSize: 14,
-                      color: "var(--primary)",
-                      cursor: "pointer",
-                      flex: 1,
-                    }}
-                  >
-                    {todo.title}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Main Tasks Section */}
-      <section style={{ marginBottom: 32 }}>
-        <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
-          <span className="material-symbols-rounded" style={{ fontSize: 20, color: "var(--secondary)" }}>
-            assignment
-          </span>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--secondary)", margin: 0, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Tasks
-          </h2>
-          {activeTasks.length > 0 && (
-            <span style={{
-              fontSize: 11, fontWeight: 700, backgroundColor: "var(--surface-variant)",
-              color: "var(--secondary)", padding: "2px 8px", borderRadius: 10,
-            }}>
-              {activeTasks.length}
-            </span>
-          )}
-        </div>
-
-        {activeTasks.length === 0 ? (
-          <div style={{
-            padding: "24px 20px",
-            borderRadius: 16,
-            border: "1px dashed var(--border)",
-            textAlign: "center",
-          }}>
-            <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>
-              No tasks yet. Click Add to create one.
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {activeTasks.map((task) => {
-              const overdue = task.dueDate ? task.dueDate < today : false;
-              const goal = task.goalId ? goalName(task.goalId) : "";
-              return (
-                <div
-                  key={task.id}
-                  onClick={() => {
-                    setEditingTask(task);
-                    setModalOpen(true);
-                  }}
-                  className="flex items-start gap-3"
-                  style={{
-                    padding: "16px 18px",
-                    borderRadius: 16,
-                    border: "1px solid var(--border)",
-                    backgroundColor: "var(--surface)",
-                    cursor: "pointer",
-                    transition: "background-color 0.15s",
-                  }}
-                >
-                  {/* Checkbox */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleComplete(task);
-                    }}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      border: "2px solid var(--border)",
-                      background: "none",
-                      cursor: "pointer",
-                      flexShrink: 0,
-                      marginTop: 1,
-                    }}
-                  />
-
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Title */}
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--primary)", marginBottom: 4 }}>
-                      {task.title}
-                    </div>
-
-                    {/* Meta row */}
-                    <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
-                      {/* Due date */}
-                      {task.dueDate && (
-                        <span className="flex items-center gap-1" style={{
-                          fontSize: 12,
-                          color: overdue ? "var(--error)" : "var(--secondary)",
-                          fontWeight: overdue ? 600 : 400,
-                        }}>
-                          <span className="material-symbols-rounded" style={{ fontSize: 14 }}>calendar_today</span>
-                          {formatDate(task.dueDate)}
-                          {overdue && " (overdue)"}
-                        </span>
-                      )}
-                      {/* Goal */}
-                      {goal && (
-                        <span className="flex items-center gap-1" style={{ fontSize: 12, color: "var(--secondary)" }}>
-                          <span className="material-symbols-rounded" style={{ fontSize: 14 }}>flag</span>
-                          {goal}
-                        </span>
-                      )}
-                      {/* Notification indicator */}
-                      {task.notificationDateTime && (
-                        <span className="flex items-center gap-1" style={{ fontSize: 12, color: "var(--secondary)" }}>
-                          <span className="material-symbols-rounded" style={{ fontSize: 14 }}>notifications</span>
-                          Reminder set
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Description preview */}
-                    {task.description && (
-                      <p style={{
-                        fontSize: 12,
-                        color: "var(--secondary)",
-                        margin: "6px 0 0",
-                        lineHeight: 1.4,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}>
-                        {task.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Completed Tasks Section */}
-      {completedTasks.length > 0 && (
-        <section>
-          <button
-            onClick={() => setShowCompleted(!showCompleted)}
-            className="flex items-center gap-2"
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px 0",
-              marginBottom: 14,
-            }}
-          >
-            <span className="material-symbols-rounded" style={{
-              fontSize: 18,
-              color: "var(--secondary)",
-              transition: "transform 0.2s",
-              transform: showCompleted ? "rotate(90deg)" : "rotate(0deg)",
-            }}>
-              chevron_right
-            </span>
-            <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--secondary)", margin: 0, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Completed
-            </h2>
-            <span style={{
-              fontSize: 11, fontWeight: 700, backgroundColor: "var(--surface-variant)",
-              color: "var(--secondary)", padding: "2px 8px", borderRadius: 10,
-            }}>
-              {completedTasks.length}
-            </span>
-          </button>
-
-          {showCompleted && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {completedTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="flex items-center gap-3"
-                  style={{
-                    padding: "14px 18px",
-                    borderRadius: 16,
-                    border: "1px solid var(--border)",
-                    backgroundColor: "var(--surface)",
-                    opacity: 0.5,
-                  }}
-                >
-                  {/* Checked box */}
-                  <button
-                    onClick={() => uncompleteTask(task)}
-                    style={{
-                      width: 22,
-                      height: 22,
-                      borderRadius: 6,
-                      border: "none",
-                      background: "var(--primary)",
-                      cursor: "pointer",
-                      flexShrink: 0,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--background)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </button>
-                  <span style={{
-                    fontSize: 14,
-                    color: "var(--primary)",
-                    textDecoration: "line-through",
-                    opacity: 0.7,
-                  }}>
-                    {task.title}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Edit Modal */}
-      <TaskEditModal
-        isOpen={modalOpen}
-        onClose={() => {
-          setModalOpen(false);
-          setEditingTask(null);
-        }}
-        onSave={handleSave}
-        onDelete={handleDelete}
-        task={editingTask}
-        goals={goals}
-        userId={user?.uid ?? ""}
-        nextSortOrder={nextSortOrder}
-      />
+  const [tasks, setTasks] = useState<Task[]>([]); const [goals, setGoals] = useState<Goal[]>([]); const [buckets, setBuckets] = useState<Bucket[]>([]);
+  const [loading, setLoading] = useState(true); const [tab, setTab] = useState<TaskTab>("list"); const [modalOpen, setModalOpen] = useState(false); const [editingTask, setEditingTask] = useState<Task | null>(null); const [viewingTask, setViewingTask] = useState<Task | null>(null); const [newTaskType, setNewTaskType] = useState<"todo" | "task">("task"); const [completing, setCompleting] = useState<Set<string>>(new Set());
+  useEffect(() => { if (!user) return; const a = subscribeToTasks(user.uid, (items) => { setTasks(items); setLoading(false); }); const b = subscribeToGoals(user.uid, setGoals); const c = subscribeToBuckets(user.uid, setBuckets); return () => { a(); b(); c(); }; }, [user]);
+  const active = useMemo(() => tasks.filter((task) => task.type === "task" && !task.completed && !task.archived), [tasks]);
+  const quickTodos = useMemo(() => tasks.filter((task) => task.type === "todo" && !task.completed && !task.archived), [tasks]);
+  const completed = useMemo(() => tasks.filter((task) => task.completed), [tasks]);
+  const goalMap = useMemo(() => new Map(goals.map((goal) => [goal.id, goal])), [goals]); const bucketMap = useMemo(() => new Map(buckets.map((bucket) => [bucket.id, bucket])), [buckets]);
+  const listGroups = useMemo(() => {
+    const today = dateKey(new Date());
+    const taskDate = (task: Task) => task.dueDateTime?.split("T")[0] ?? task.dueDate ?? undefined;
+    const todayTasks = active.filter((task) => taskDate(task) === today).sort(sortByPriority);
+    const lateTasks = active.filter((task) => { const due = taskDate(task); return !!due && due < today; }).sort((a, b) => taskDate(a)!.localeCompare(taskDate(b)!) || a.sortOrder - b.sortOrder);
+    const upcomingAndUnscheduled = active.filter((task) => { const due = taskDate(task); return !due || due > today; });
+    return [
+      ...(todayTasks.length ? [{ key: today, label: "Today", tasks: todayTasks }] : []),
+      ...(lateTasks.length ? [{ key: "late", label: "Late", tasks: lateTasks }] : []),
+      ...groupTasks(upcomingAndUnscheduled, taskDate),
+    ];
+  }, [active]);
+  const historyRows = useMemo(() => [...completed].sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0)), [completed]);
+  const create = () => { setEditingTask(null); setNewTaskType("task"); setModalOpen(true); };
+  const createTodo = () => { setEditingTask(null); setNewTaskType("todo"); setModalOpen(true); };
+  const finish = useCallback((task: Task) => { setCompleting((current) => new Set(current).add(task.id)); setTimeout(async () => { await completeTask(task); setCompleting((current) => { const next = new Set(current); next.delete(task.id); return next; }); }, task.type === "todo" ? 280 : 0); }, []);
+  if (loading) return <div style={{ padding: 32, color: "var(--secondary)" }}>Loading...</div>;
+  return <div style={{ padding: 32, width: "100%", maxWidth: "none" }}>
+    <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}><h1 style={{ margin: 0, color: "var(--primary)", fontSize: 24, fontWeight: 700 }}>Tasks</h1><button type="button" onClick={create} style={primaryButton}>+ New</button></div>
+    <div role="tablist" className="flex items-center" style={{ width: "fit-content", padding: 4, marginBottom: 24, borderRadius: 14, background: "var(--surface-variant)" }}>{(["list", "history"] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)} style={{ padding: "9px 16px", border: "none", borderRadius: 10, background: tab === item ? "var(--surface)" : "transparent", boxShadow: tab === item ? "0 1px 3px rgba(0,0,0,.12)" : "none", color: tab === item ? "var(--primary)" : "var(--secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, textTransform: "capitalize" }}>{item}</button>)}</div>
+    <div className="flex flex-col lg:flex-row gap-8" style={{ alignItems: "stretch", minHeight: "calc(100dvh - 190px)" }}>
+    <main className="flex-1 min-w-0" style={{ minHeight: "100%" }}>
+    {tab === "list" && (active.length === 0 ? <AllClear onAction={create} hasHistory={completed.length > 0} /> : <div style={{ ...shell, padding: "3px 7px", overflow: "hidden" }}>{listGroups.map((group, groupIndex) => <section key={group.key}><DateHeader label={group.label} count={group.tasks.length} first={groupIndex === 0} late={group.key === "late"} />{group.tasks.map((task, index) => <ListTask key={task.id} task={task} last={index === group.tasks.length - 1} completing={completing.has(task.id)} goal={goalMap.get(task.goalId)} bucket={goalMap.get(task.goalId) ? bucketMap.get(goalMap.get(task.goalId)!.bucketId) : undefined} onFinish={() => finish(task)} onEdit={() => setViewingTask(task)} />)}</section>)}</div>)}
+    {tab === "history" && (historyRows.length === 0 ? <Empty title="No task history yet" description="Completed tasks and to-dos will appear here." /> : <div style={{ ...shell, padding: "0 7px", overflow: "hidden" }}><div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, .7fr) minmax(0, .9fr) minmax(0, .9fr) minmax(0, .65fr)", gap: 8, minHeight: 31, alignItems: "center", borderBottom: "1px solid var(--border)", color: "var(--secondary)", fontSize: 9, fontWeight: 750, letterSpacing: "0.05em", textTransform: "uppercase" }}><span>Task</span><span>Type</span><span>Completed</span><span>Due</span><span>Priority</span></div>{historyRows.map((task, index) => <HistoryTaskRow key={task.id} task={task} goal={goalMap.get(task.goalId)} last={index === historyRows.length - 1} onUndo={() => void uncompleteTask(task)} onEdit={() => setViewingTask(task)} />)}</div>)}
+    </main>
+    <aside className="w-full lg:w-80 shrink-0" style={{ minHeight: "100%" }}><QuickTodoRail todos={quickTodos} completing={completing} onAdd={createTodo} onFinish={finish} onEdit={setViewingTask} /></aside>
     </div>
-  );
+    <TaskEditModal isOpen={modalOpen} onClose={() => { setModalOpen(false); setEditingTask(null); }} onSave={async (task) => saveTask(task)} onDelete={async (id) => deleteTask(id)} task={editingTask} goals={goals} buckets={buckets} defaultType={newTaskType} userId={user?.uid ?? ""} nextSortOrder={tasks.length} />
+    <TaskDetailsModal isOpen={!!viewingTask} task={viewingTask} goals={goals} buckets={buckets} onClose={() => setViewingTask(null)} onEdit={() => { setEditingTask(viewingTask); setViewingTask(null); setModalOpen(true); }} />
+  </div>;
 }
 
-function formatDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  if (date.getTime() === today.getTime()) return "Today";
-  if (date.getTime() === tomorrow.getTime()) return "Tomorrow";
-
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
+function ListTask({ task, last, completing, goal, bucket, onFinish, onEdit }: { task: Task; last: boolean; completing: boolean; goal?: Goal; bucket?: Bucket; onFinish: () => void; onEdit: () => void }) { const priority = priorityMeta[task.priority ?? "medium"]; const due = task.dueDateTime ?? task.dueDate ?? null; const goalIcon = goal ? resolveIconName(goal.iconName) : "flag"; return <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.1fr) minmax(0, 1.45fr) minmax(0, .43fr) minmax(0, .95fr) minmax(0, .55fr)", gap: 8, minHeight: 43, alignItems: "center", borderBottom: last ? "none" : "1px solid var(--border)", opacity: completing ? .4 : 1 }}><div className="flex items-center" style={{ minWidth: 0, gap: 8 }}><button type="button" onClick={onFinish} aria-label={`Complete ${task.title}`} style={{ width: 18, height: 18, flexShrink: 0, border: "2px solid var(--border)", borderRadius: task.type === "todo" ? "50%" : 5, background: "transparent", cursor: "pointer" }} /><button type="button" onClick={onEdit} style={{ minWidth: 0, padding: 0, border: "none", background: "transparent", color: "var(--primary)", cursor: "pointer", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 650 }}>{task.title}</button></div><span className="flex items-center" style={{ minWidth: 0, gap: 4, overflow: "hidden", color: "var(--secondary)", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{goal ? <><span className="material-symbols-rounded" style={{ flexShrink: 0, color: bucket ? argbToHex(bucket.color) : "var(--secondary)", fontSize: 14 }}>{goalIcon}</span><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{goal.name}</span></> : "No goal"}</span><span style={{ overflow: "hidden", color: "var(--secondary)", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{task.type === "todo" ? "To-Do" : "Task"}</span><span className="flex items-center" style={{ minWidth: 0, gap: 3, overflow: "hidden", color: task.type === "todo" ? "var(--secondary)" : dueUrgencyColor(due), fontSize: 11, fontWeight: 650, whiteSpace: "nowrap", textOverflow: "ellipsis" }}><span style={{ flexShrink: 0 }}>Due</span><span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{task.type === "todo" ? "N/A" : due ? displayDateTime(due) : "No due date"}</span></span><span className="flex items-center" style={{ minWidth: 0, gap: 5, overflow: "hidden", color: priority.color, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis" }}><span style={{ width: 6, height: 6, flexShrink: 0, borderRadius: "50%", background: priority.color }} />{priority.label}</span></div>; }
+function QuickTodoRail({ todos, completing, onAdd, onFinish, onEdit }: { todos: Task[]; completing: Set<string>; onAdd: () => void; onFinish: (task: Task) => void; onEdit: (task: Task) => void }) { return <div className="flex flex-col" style={{ height: "100%" }}><div className="flex items-center justify-between" style={{ marginBottom: 12 }}><h2 style={{ margin: 0, color: "var(--secondary)", fontSize: 13, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>Quick To-Dos</h2><button type="button" onClick={onAdd} style={{ padding: 0, border: "none", background: "transparent", color: "var(--primary)", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add</button></div>{todos.length === 0 ? <div className="flex flex-col items-center justify-center" style={{ flex: 1, minHeight: 360, padding: "26px 18px", border: "1px dashed var(--border)", borderRadius: 16, background: "var(--surface)", textAlign: "center" }}><span className="material-symbols-rounded" style={{ display: "block", marginBottom: 7, color: "var(--secondary)", fontSize: 24 }}>check_circle</span><p style={{ margin: 0, color: "var(--primary)", fontSize: 14, fontWeight: 650 }}>No quick to-dos</p><p style={{ margin: "5px 0 14px", color: "var(--secondary)", fontSize: 12, lineHeight: 1.45 }}>Keep small, one-off tasks here.</p><button type="button" onClick={onAdd} style={{ ...primaryButton, padding: "9px 13px", fontSize: 12 }}>Add a to-do</button></div> : <div className="flex flex-col" style={{ gap: 8 }}>{todos.map((todo) => <div key={todo.id} className="flex items-center gap-3" style={{ padding: "12px", border: "1px solid var(--border)", borderRadius: 14, background: "var(--surface)", opacity: completing.has(todo.id) ? .4 : 1 }}><button type="button" onClick={() => onFinish(todo)} aria-label={`Complete ${todo.title}`} style={{ width: 20, height: 20, flexShrink: 0, border: "2px solid var(--border)", borderRadius: "50%", background: "transparent", cursor: "pointer" }} /><button type="button" onClick={() => onEdit(todo)} style={{ flex: 1, minWidth: 0, padding: 0, border: "none", background: "transparent", color: "var(--primary)", cursor: "pointer", textAlign: "left", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{todo.title}</button></div>)}</div>}</div>; }
+function HistoryTaskRow({ task, goal, last, onUndo, onEdit }: { task: Task; goal?: Goal; last: boolean; onUndo: () => void; onEdit: () => void }) { const priority = priorityMeta[task.priority ?? "medium"]; const due = task.dueDateTime ?? task.dueDate ?? null; return <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, .7fr) minmax(0, .9fr) minmax(0, .9fr) minmax(0, .65fr)", gap: 8, minHeight: 43, alignItems: "center", borderBottom: last ? "none" : "1px solid var(--border)" }}><div className="flex items-center" style={{ minWidth: 0, gap: 8 }}><button type="button" onClick={onUndo} aria-label={`Mark ${task.title} incomplete`} style={{ width: 18, height: 18, flexShrink: 0, border: "none", borderRadius: task.type === "todo" ? "50%" : 5, background: "#36a269", color: "#fff", cursor: "pointer", display: "grid", placeItems: "center" }}><span className="material-symbols-rounded" style={{ fontSize: 13 }}>check</span></button><button type="button" onClick={onEdit} style={{ minWidth: 0, padding: 0, border: "none", background: "transparent", color: "var(--primary)", cursor: "pointer", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 650, textDecoration: "line-through", opacity: .78 }}>{task.title}</button></div><span style={{ overflow: "hidden", color: "var(--secondary)", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{task.type === "todo" ? "To-Do" : "Task"}</span><span style={{ overflow: "hidden", color: "var(--secondary)", fontSize: 11, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{longDate(task.completedAt)}</span><span style={{ overflow: "hidden", color: task.type === "todo" ? "var(--secondary)" : dueUrgencyColor(due), fontSize: 11, fontWeight: 650, whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{task.type === "todo" ? "N/A" : due ? longDate(due) : "No due date"}</span><span className="flex items-center" style={{ minWidth: 0, gap: 5, overflow: "hidden", color: priority.color, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", textOverflow: "ellipsis" }}><span style={{ width: 6, height: 6, flexShrink: 0, borderRadius: "50%", background: priority.color }} />{priority.label}</span></div>; }
+function DateHeader({ label, count, first, late = false }: { label: string; count: number; first: boolean; late?: boolean }) { const accent = late ? "#dd5252" : "var(--secondary)"; return <div className="flex items-center" style={{ gap: 6, marginTop: first ? 1 : 7, marginBottom: 1, padding: "4px 6px", borderRadius: 8, background: "var(--surface)", color: late ? accent : "var(--primary)" }}><span className="material-symbols-rounded" style={{ fontSize: 15, color: accent }}>{late ? "warning" : "calendar_today"}</span><span style={{ fontSize: 12, fontWeight: 750 }}>{label}</span><span style={{ color: late ? accent : "var(--secondary)", fontSize: 10, fontWeight: 650 }}>({count})</span></div>; }
+function Empty({ title, description, action }: { title: string; description: string; action?: () => void }) { return <div style={{ padding: "42px 24px", border: "1px dashed var(--border)", borderRadius: 16, textAlign: "center" }}><h2 style={{ margin: 0, color: "var(--primary)", fontSize: 17 }}>{title}</h2><p style={{ margin: "8px 0 18px", color: "var(--secondary)", fontSize: 13 }}>{description}</p>{action && <button type="button" onClick={action} style={primaryButton}>Create task</button>}</div>; }
+function AllClear({ onAction, hasHistory }: { onAction: () => void; hasHistory: boolean }) { return <div style={{ padding: "40px 24px", border: "1px dashed var(--border)", borderRadius: 16, background: "var(--surface)", textAlign: "center" }}><div style={{ width: 52, height: 52, margin: "0 auto 14px", borderRadius: "50%", display: "grid", placeItems: "center", color: "#36a269", background: "var(--surface-variant)" }}><span className="material-symbols-rounded" style={{ fontSize: 29 }}>celebration</span></div><h2 style={{ margin: 0, color: "var(--primary)", fontSize: 18, fontWeight: 700 }}>All clear</h2><p style={{ maxWidth: 320, margin: "8px auto 18px", color: "var(--secondary)", fontSize: 13, lineHeight: 1.5 }}>{hasHistory ? "Everything on your list is complete." : "Nothing on your list right now."}</p><button type="button" onClick={onAction} style={primaryButton}>Add a task</button></div>; }
+function sortByPriority(a: Task, b: Task) { return priorityMeta[a.priority ?? "medium"].rank - priorityMeta[b.priority ?? "medium"].rank || a.sortOrder - b.sortOrder; }
+function groupTasks(tasks: Task[], dateFor: (task: Task) => string | undefined) { const groups = new Map<string, Task[]>(); tasks.forEach((task) => { const key = dateFor(task) ?? "unscheduled"; groups.set(key, [...(groups.get(key) ?? []), task]); }); return [...groups.entries()].sort(([a], [b]) => a === "unscheduled" ? 1 : b === "unscheduled" ? -1 : a.localeCompare(b)).map(([key, grouped]) => ({ key, label: key === "unscheduled" ? "Unscheduled" : displayDate(key), tasks: grouped.sort(sortByPriority) })); }
+function dateKey(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
+function argbToHex(argb: number) { return `#${(argb & 0x00ffffff).toString(16).padStart(6, "0")}`; }
+function longDate(value: string | number | null | undefined) { if (!value) return "—"; const date = typeof value === "number" ? new Date(value) : new Date(value.includes("T") ? value : `${value}T00:00`); return date.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }); }
+function dueUrgencyColor(value: string | null) { if (!value) return "var(--secondary)"; const date = new Date(value.includes("T") ? value : `${value}T00:00`); const hours = (date.getTime() - Date.now()) / 3_600_000; if (hours <= 24) return priorityMeta.critical.color; if (hours <= 72) return priorityMeta.high.color; return "#e7c94b"; }
+function displayDate(value: string) { const [year, month, day] = value.split("-").map(Number); const date = new Date(year, month - 1, day); const today = dateKey(new Date()); const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1); if (value === today) return "Today"; if (value === dateKey(tomorrow)) return "Tomorrow"; return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }); }
+function displayDateTime(value: string) { const [datePart, timePart] = value.split("T"); if (!timePart) return displayDate(datePart); const [year, month, day] = datePart.split("-").map(Number); const [hour, minute] = timePart.split(":").map(Number); return `${displayDate(datePart)}, ${new Date(year, month - 1, day, hour, minute).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`; }

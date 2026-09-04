@@ -77,7 +77,7 @@ function HabitEmptyState({
           overflow: "hidden",
         }}
       >
-        <Image src={logoPic} alt="Committed" width={48} height={48} style={{ borderRadius: 14, objectFit: "cover" }} />
+        <Image src={logoPic} alt="Committed" width={48} height={48} loading="eager" style={{ width: 48, height: 48, borderRadius: 14, objectFit: "cover" }} />
       </div>
       <p style={{ fontSize: 16, fontWeight: 700, color: "var(--primary)", margin: "0 0 6px" }}>{title}</p>
       <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0 }}>{description}</p>

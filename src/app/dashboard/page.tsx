@@ -20,6 +20,7 @@ import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
 import ScheduledCheckInPopup from "@/components/scheduled-checkin-popup";
 import { resolveScheduledCheckIn, subscribeToScheduledCheckIns } from "@/lib/scheduled-checkins-service";
+import IdeaCapture from "@/components/idea-capture";
 
 function argbToHex(argb: number): string {
   const rgb = argb & 0x00ffffff;
@@ -337,6 +338,7 @@ export default function DashboardHome() {
         {/* RIGHT COLUMN — Today's Habits */}
         {!loading && (
           <div className="home-habits w-full lg:w-80 shrink-0">
+            {user && <IdeaCapture userId={user.uid} showToast />}
             <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
               <h2 style={{ fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--secondary)", margin: 0 }}>
                 Today&apos;s Habits

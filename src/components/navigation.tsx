@@ -17,17 +17,28 @@ const navItems: NavItem[] = [
   { label: "Calendar", path: "/dashboard/calendar", icon: "calendar" },
   { label: "Overview", path: "/dashboard/overview", icon: "overview" },
   { label: "Habits", path: "/dashboard/habits", icon: "habit" },
+  { label: "Tasks", path: "/dashboard/tasks", icon: "task" },
+  { label: "Ideas", path: "/dashboard/ideas", icon: "idea" },
   { label: "Tools", path: "/dashboard/tools", icon: "tools" },
   { label: "Workouts", path: "/dashboard/workouts", icon: "workouts" },
+  { label: "Notes", path: "/dashboard/notes", icon: "notes" },
 ];
 
-const mobileNavItems: NavItem[] = [
-  navItems[0],
-  navItems[1],
-  navItems[5],
-  navItems[3],
-  navItems[2],
+const mobileNavPaths = [
+  "/dashboard",
+  "/dashboard/calendar",
+  "/dashboard/workouts",
+  "/dashboard/habits",
+  "/dashboard/ideas",
 ];
+
+const mobileNavItems: NavItem[] = mobileNavPaths.map(
+  (path) => navItems.find((item) => item.path === path) as NavItem
+);
+
+const mobileOverflowNavItems = navItems.filter(
+  (item) => !mobileNavPaths.includes(item.path)
+);
 
 function NavIcon({ icon, active }: { icon: string; active: boolean }) {
   const color = active ? "var(--primary)" : "var(--secondary)";
@@ -84,10 +95,20 @@ function NavIcon({ icon, active }: { icon: string; active: boolean }) {
     case "task":
       return (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-          <line x1="9" y1="9" x2="15" y2="9" />
-          <line x1="9" y1="13" x2="15" y2="13" />
-          <line x1="9" y1="17" x2="12" y2="17" />
+          <path d="M9 4h6" />
+          <path d="M9 3a2 2 0 0 0-2 2v1H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2V5a2 2 0 0 0-2-2" />
+          <rect x="8" y="3" width="8" height="4" rx="1" />
+          <path d="m7.5 13 2 2 3.5-4" />
+          <path d="M14 14h3" />
+          <path d="M14 18h3" />
+        </svg>
+      );
+    case "idea":
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9.5 4.5A3 3 0 0 0 4 6.2a3.4 3.4 0 0 0-1.5 5.5A3.1 3.1 0 0 0 4 17a3.3 3.3 0 0 0 5.5 2.4V4.5Z" />
+          <path d="M14.5 4.5A3 3 0 0 1 20 6.2a3.4 3.4 0 0 1 1.5 5.5A3.1 3.1 0 0 1 20 17a3.3 3.3 0 0 1-5.5 2.4V4.5Z" />
+          <path d="M9.5 8H7.8a1.8 1.8 0 0 0-1.7 2.4M14.5 8h1.7a1.8 1.8 0 0 1 1.7 2.4M9.5 14H8a2 2 0 0 0-1.8 1.1M14.5 14H16a2 2 0 0 1 1.8 1.1" />
         </svg>
       );
     case "tools":
@@ -104,6 +125,15 @@ function NavIcon({ icon, active }: { icon: string; active: boolean }) {
           <path d="M7 12h10" />
           <path d="M17 6v12" />
           <path d="M20 9v6" />
+        </svg>
+      );
+    case "notes":
+      return (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5z" />
+          <path d="M4 4.5v17" />
+          <path d="M8 7h8" />
+          <path d="M8 11h6" />
         </svg>
       );
     case "ai":
@@ -171,6 +201,7 @@ export default function Navigation() {
   const pathname = usePathname();
   const router = useRouter();
   const { signOut } = useAuth();
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   const settingsActive = pathname === "/dashboard/settings";
 
@@ -194,7 +225,10 @@ export default function Navigation() {
             alt="Committed Logo" 
             width={38}
             height={38}
+            loading="eager"
             style={{
+              width: 38,
+              height: 38,
               borderRadius: 12,
               objectFit: "cover",
               flexShrink: 0,
@@ -264,6 +298,80 @@ export default function Navigation() {
       </aside>
 
       {/* Mobile Bottom Nav */}
+      {mobileMoreOpen && (
+        <>
+          <button
+            type="button"
+            className="mobile-nav-drawer-scrim md:hidden"
+            aria-label="Close more navigation"
+            onClick={() => setMobileMoreOpen(false)}
+            style={{
+              position: "fixed",
+              zIndex: 45,
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              padding: 0,
+              border: 0,
+              background: "rgba(0, 0, 0, .22)",
+            }}
+          />
+          <div
+            className="mobile-nav-drawer md:hidden"
+            role="menu"
+            aria-label="More navigation"
+            style={{
+              position: "fixed",
+              zIndex: 50,
+              right: "calc(8px + var(--app-safe-right))",
+              bottom: "calc(76px + var(--app-safe-bottom))",
+              width: "min(208px, calc(100vw - 32px))",
+              display: "grid",
+              gap: 3,
+              padding: 7,
+              border: "1px solid var(--border)",
+              borderRadius: 17,
+              background: "var(--surface)",
+              boxShadow: "0 16px 42px rgba(0, 0, 0, .34)",
+            }}
+          >
+            {mobileOverflowNavItems.map((item) => {
+              const active = pathname === item.path || pathname.startsWith(`${item.path}/`);
+              return (
+                <button
+                  key={item.path}
+                  type="button"
+                  role="menuitem"
+                  className={active ? "active" : ""}
+                  onClick={() => {
+                    setMobileMoreOpen(false);
+                    router.push(item.path);
+                  }}
+                  style={{
+                    width: "100%",
+                    minHeight: 43,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 11,
+                    padding: "8px 10px",
+                    border: 0,
+                    borderRadius: 11,
+                    background: active ? "var(--surface-variant)" : "transparent",
+                    color: active ? "var(--primary)" : "var(--secondary)",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: active ? 750 : 650,
+                    textAlign: "left",
+                  }}
+                >
+                  <NavIcon icon={item.icon} active={active} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
       <nav
         aria-label="Primary navigation"
         className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-40 flex items-center"
@@ -317,6 +425,26 @@ export default function Navigation() {
             </button>
           );
         })}
+        <button
+          type="button"
+          className="mobile-nav-item mobile-nav-more flex flex-col items-center justify-center"
+          aria-label={mobileMoreOpen ? "Close more navigation" : "Open more navigation"}
+          aria-expanded={mobileMoreOpen}
+          onClick={() => setMobileMoreOpen((open) => !open)}
+          style={{
+            gap: 4,
+            padding: "5px 8px",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            position: "relative",
+          }}
+        >
+          <span className="material-symbols-rounded" style={{ fontSize: 24, color: "var(--secondary)" }} aria-hidden="true">
+            {mobileMoreOpen ? "keyboard_arrow_down" : "keyboard_arrow_up"}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--secondary)", fontWeight: 500 }}>More</span>
+        </button>
       </nav>
     </>
   );

@@ -62,7 +62,7 @@ export async function saveSettings(userId: string, settings: UserSettings): Prom
     workoutHabitMappingHabitId: settings.workoutHabitMappingHabitId,
     stretchHabitMappingEnabled: settings.stretchHabitMappingEnabled,
     stretchHabitMappingHabitId: settings.stretchHabitMappingHabitId,
-  });
+  }, { merge: true });
 }
 
 /** Gets the persisted settings for actions triggered outside the settings page. */

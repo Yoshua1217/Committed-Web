@@ -15,6 +15,9 @@ const USER_DATA_COLLECTIONS = [
   "habits",
   "habit_completions",
   "tasks",
+  "ideas",
+  "note_folders",
+  "notes",
 ] as const;
 
 const LOCAL_STORAGE_KEYS = [
@@ -44,5 +47,13 @@ export async function resetAccountData(userId: string): Promise<void> {
 
   if (typeof window !== "undefined") {
     LOCAL_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
+    [
+      "committed-google-calendar-token",
+      "committed-google-calendar-order",
+      "committed-google-calendar-cache",
+    ].forEach((prefix) => localStorage.removeItem(`${prefix}:${userId}`));
+    sessionStorage.removeItem(`committed-google-calendar-token:${userId}`);
+    sessionStorage.removeItem(`committed-google-calendar-write-token-v2:${userId}`);
+    sessionStorage.removeItem(`committed-google-calendar-write-token-time-v2:${userId}`);
   }
 }
