@@ -886,10 +886,11 @@ export default function NotesPage() {
     updateActiveNote({ content: value });
     const lineStart = value.lastIndexOf("\n", cursor - 1) + 1;
     const beforeCursor = value.slice(lineStart, cursor);
-    const slashMatch = beforeCursor.match(/^\/([a-zA-Z0-9]*)$/);
+    const slashMatch = beforeCursor.match(/(^|\s)\/([a-zA-Z0-9]*)$/);
     const linkMatch = beforeCursor.match(/\[\[([^\]]*)$/);
     if (slashMatch) {
-      setSlashRange({ start: lineStart, end: cursor, query: slashMatch[1] });
+      const commandStart = lineStart + (slashMatch.index ?? 0) + slashMatch[1].length;
+      setSlashRange({ start: commandStart, end: cursor, query: slashMatch[2] });
       setLinkRange(null);
       setMenuIndex(0);
       refreshFloatingMenu(event.target);
