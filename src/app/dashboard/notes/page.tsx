@@ -42,6 +42,7 @@ const NOTES_SIDEBAR_MIN_WIDTH = 220;
 const NOTES_SIDEBAR_MAX_WIDTH = 460;
 const NOTES_SIDEBAR_WIDTH_KEY = "committed-notes-sidebar-width";
 const NOTES_SIDEBAR_COLLAPSED_KEY = "committed-notes-sidebar-collapsed";
+const NOTES_DEFAULT_EDITOR_MODE_KEY = "committed-notes-default-editor-mode";
 const NOTES_LAST_OPENED_KEY_PREFIX = "committed-notes-last-opened:";
 
 interface SlashCommandBase {
@@ -307,6 +308,7 @@ export default function NotesPage() {
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [notePendingDelete, setNotePendingDelete] = useState<MarkdownNote | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("write");
+  const [defaultEditorMode, setDefaultEditorMode] = useState<EditorMode>("write");
   const [formattedPreviewOpen, setFormattedPreviewOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(282);
@@ -327,10 +329,13 @@ export default function NotesPage() {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const initializedForUserRef = useRef<string | null>(null);
   const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const inFlightSaveCountsRef = useRef<Map<string, number>>(new Map());
+  const locallyDirtyNoteIdsRef = useRef<Set<string>>(new Set());
   const lastFolderLabelClickRef = useRef<{ folderId: string; timestamp: number } | null>(null);
   const notesRef = useRef<MarkdownNote[]>([]);
   const uploadNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarPreferencesLoadedRef = useRef(false);
+  const editorModePreferenceLoadedRef = useRef(false);
   const restoredLastNoteForUserRef = useRef<string | null>(null);
 
   const showImageNotice = useCallback((message: string, error = false) => {
@@ -347,9 +352,41 @@ export default function NotesPage() {
       setFoldersLoaded(true);
     });
     const unsubscribeNotes = subscribeToMarkdownNotes(user.uid, (nextNotes) => {
-      notesRef.current = nextNotes;
-      setNotes(nextNotes);
+      const editor = editorRef.current;
+      const preserveSelection = editor && document.activeElement === editor
+        ? { start: editor.selectionStart, end: editor.selectionEnd, scrollTop: editor.scrollTop }
+        : null;
+      const localById = new Map(notesRef.current.map((note) => [note.id, note]));
+      const mergedNotes = nextNotes.map((incomingNote) => {
+        const localNote = localById.get(incomingNote.id);
+        if (!localNote) return incomingNote;
+        const localSavePending = saveTimersRef.current.has(incomingNote.id)
+          || (inFlightSaveCountsRef.current.get(incomingNote.id) ?? 0) > 0;
+        const localIsNewer = localNote.updatedAt > incomingNote.updatedAt;
+        const incomingMatchesLocal = localNote.content === incomingNote.content && localNote.title === incomingNote.title;
+        if (incomingMatchesLocal && incomingNote.updatedAt >= localNote.updatedAt) locallyDirtyNoteIdsRef.current.delete(incomingNote.id);
+        const pendingContentDiffers = (localSavePending || locallyDirtyNoteIdsRef.current.has(incomingNote.id)) && !incomingMatchesLocal;
+        return localIsNewer || pendingContentDiffers ? localNote : incomingNote;
+      });
+      const incomingIds = new Set(nextNotes.map((note) => note.id));
+      notesRef.current.forEach((localNote) => {
+        const isPending = saveTimersRef.current.has(localNote.id)
+          || (inFlightSaveCountsRef.current.get(localNote.id) ?? 0) > 0
+          || locallyDirtyNoteIdsRef.current.has(localNote.id);
+        if (!incomingIds.has(localNote.id) && isPending) mergedNotes.push(localNote);
+      });
+      notesRef.current = mergedNotes;
+      setNotes(mergedNotes);
       setNotesLoaded(true);
+      if (preserveSelection) {
+        requestAnimationFrame(() => {
+          const currentEditor = editorRef.current;
+          if (!currentEditor || document.activeElement !== currentEditor) return;
+          const maximum = currentEditor.value.length;
+          currentEditor.setSelectionRange(Math.min(preserveSelection.start, maximum), Math.min(preserveSelection.end, maximum));
+          currentEditor.scrollTop = preserveSelection.scrollTop;
+        });
+      }
     });
     const localCalendarCache = readLocalCalendarSyncCache(user.uid);
     let promotedLocalCalendarCache = false;
@@ -408,6 +445,24 @@ export default function NotesPage() {
     window.localStorage.setItem(NOTES_SIDEBAR_WIDTH_KEY, String(sidebarWidth));
     window.localStorage.setItem(NOTES_SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
   }, [sidebarCollapsed, sidebarWidth]);
+
+  useEffect(() => {
+    const savedMode = window.localStorage.getItem(NOTES_DEFAULT_EDITOR_MODE_KEY);
+    const defaultMode: EditorMode = savedMode === "preview" || savedMode === "write"
+      ? savedMode
+      : window.matchMedia("(max-width: 767px)").matches ? "preview" : "write";
+    const frame = window.requestAnimationFrame(() => {
+      editorModePreferenceLoadedRef.current = true;
+      setDefaultEditorMode(defaultMode);
+      setEditorMode(defaultMode);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
+    if (!editorModePreferenceLoadedRef.current) return;
+    window.localStorage.setItem(NOTES_DEFAULT_EDITOR_MODE_KEY, defaultEditorMode);
+  }, [defaultEditorMode]);
 
   const beginSidebarResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === "touch") return;
@@ -489,16 +544,6 @@ export default function NotesPage() {
     return () => window.removeEventListener("keydown", openSearch);
   }, []);
 
-  useEffect(() => {
-    const mobileQuery = window.matchMedia("(max-width: 767px)");
-    const setPreviewOnMobile = () => {
-      if (mobileQuery.matches) setEditorMode("preview");
-    };
-    setPreviewOnMobile();
-    mobileQuery.addEventListener("change", setPreviewOnMobile);
-    return () => mobileQuery.removeEventListener("change", setPreviewOnMobile);
-  }, []);
-
   const folderMap = useMemo(() => new Map(folders.map((folder) => [folder.id, folder])), [folders]);
   const notebooks = folders.filter((folder) => folder.kind === "notebook");
   const activeNote = notes.find((note) => note.id === selectedNoteId) ?? notes[0] ?? null;
@@ -538,12 +583,23 @@ export default function NotesPage() {
   const scheduleSave = useCallback((note: MarkdownNote) => {
     const previousTimer = saveTimersRef.current.get(note.id);
     if (previousTimer) clearTimeout(previousTimer);
+    locallyDirtyNoteIdsRef.current.add(note.id);
     setSaveState("saving");
     const timer = setTimeout(() => {
-      void saveMarkdownNote(note)
-        .then(() => setSaveState("saved"))
-        .catch(() => setSaveState("error"));
+      const currentCount = inFlightSaveCountsRef.current.get(note.id) ?? 0;
+      inFlightSaveCountsRef.current.set(note.id, currentCount + 1);
       saveTimersRef.current.delete(note.id);
+      void saveMarkdownNote(note)
+        .then(() => {
+          const latestNote = notesRef.current.find((item) => item.id === note.id);
+          if ((!latestNote || latestNote.updatedAt <= note.updatedAt) && !saveTimersRef.current.has(note.id)) setSaveState("saved");
+        })
+        .catch(() => setSaveState("error"))
+        .finally(() => {
+          const remaining = (inFlightSaveCountsRef.current.get(note.id) ?? 1) - 1;
+          if (remaining > 0) inFlightSaveCountsRef.current.set(note.id, remaining);
+          else inFlightSaveCountsRef.current.delete(note.id);
+        });
     }, 500);
     saveTimersRef.current.set(note.id, timer);
   }, []);
@@ -559,6 +615,7 @@ export default function NotesPage() {
   const selectNote = (note: MarkdownNote) => {
     setSelectedNoteId(note.id);
     setSelectedFolderId(note.folderId);
+    setEditorMode(defaultEditorMode);
     setExpandedIds((current) => {
       const next = new Set(current);
       let parent = folderMap.get(note.folderId);
@@ -622,7 +679,7 @@ export default function NotesPage() {
     setSelectedNoteId(note.id);
     setSelectedFolderId(destination.id);
     setExpandedIds((current) => new Set(current).add(destination.id));
-    setEditorMode("write");
+    setEditorMode(defaultEditorMode);
     void saveMarkdownNote(note).catch(() => setSaveState("error"));
     requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".notes-title-input")?.select());
   };
@@ -687,6 +744,10 @@ export default function NotesPage() {
     const deletedNote = notePendingDelete;
     const noteId = deletedNote.id;
     const nextSelection = notes.find((note) => note.id !== noteId)?.id ?? null;
+    const pendingSave = saveTimersRef.current.get(noteId);
+    if (pendingSave) clearTimeout(pendingSave);
+    saveTimersRef.current.delete(noteId);
+    locallyDirtyNoteIdsRef.current.delete(noteId);
     setNotePendingDelete(null);
     notesRef.current = notesRef.current.filter((note) => note.id !== noteId);
     setNotes((current) => current.filter((note) => note.id !== noteId));
@@ -1125,7 +1186,21 @@ export default function NotesPage() {
       <div className="notes-sidebar-header">
         <div className="notes-sidebar-brand">
           <div><strong>Notes</strong><span>Markdown workspace</span></div>
-          <button type="button" className="notes-sidebar-collapse" aria-label="Collapse notes navigation" title="Collapse sidebar" onClick={() => setSidebarCollapsed(true)}>{icon("left_panel_close", 18)}</button>
+          <div className="notes-sidebar-brand-actions">
+            <button
+              type="button"
+              className="notes-sidebar-default-mode"
+              aria-label={`Newly opened notes default to ${defaultEditorMode === "preview" ? "viewing" : "editing"}`}
+              aria-pressed={defaultEditorMode === "preview"}
+              title={defaultEditorMode === "preview" ? "Newly opened notes default to viewing — switch to editing" : "Newly opened notes default to editing — switch to viewing"}
+              onClick={() => {
+                const nextMode: EditorMode = defaultEditorMode === "preview" ? "write" : "preview";
+                if (editorMode === defaultEditorMode) setEditorMode(nextMode);
+                setDefaultEditorMode(nextMode);
+              }}
+            >{icon(defaultEditorMode === "preview" ? "visibility" : "edit_note", 18)}</button>
+            <button type="button" className="notes-sidebar-collapse" aria-label="Collapse notes navigation" title="Collapse sidebar" onClick={() => setSidebarCollapsed(true)}>{icon("left_panel_close", 18)}</button>
+          </div>
         </div>
         <button type="button" className="notes-mobile-close" aria-label="Close notes navigation" onClick={() => setSidebarOpen(false)}>{icon("close")}</button>
         <label className="notes-sidebar-search">
@@ -1254,6 +1329,8 @@ export default function NotesPage() {
         headings={activeNoteHeadings}
         scrollContainerRef={editorMode === "preview" ? documentScrollRef : livePreviewScrollRef}
         scrollContainerId={editorMode === "preview" ? "notes-document-scroll" : "notes-live-preview-scroll"}
+        linkedScrollContainerRef={editorMode === "write" ? documentScrollRef : undefined}
+        linkedScrollContainerId={editorMode === "write" ? "notes-document-scroll" : undefined}
       />}
     </main>
 

@@ -59,6 +59,7 @@ export interface Idea {
   userId: string;
   text: string;
   starred: boolean;
+  completed: boolean;
   createdAt: number;
   updatedAt: number;
 }

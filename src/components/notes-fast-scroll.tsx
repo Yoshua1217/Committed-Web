@@ -15,6 +15,8 @@ interface NotesFastScrollProps {
   headings: MarkdownHeading[];
   scrollContainerRef: RefObject<HTMLDivElement | null>;
   scrollContainerId: string;
+  linkedScrollContainerRef?: RefObject<HTMLDivElement | null>;
+  linkedScrollContainerId?: string;
 }
 
 type InteractionMode = "idle" | "scrub" | "outline";
@@ -23,7 +25,13 @@ function clamp(value: number, minimum = 0, maximum = 1) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-export default function NotesFastScroll({ headings, scrollContainerRef, scrollContainerId }: NotesFastScrollProps) {
+export default function NotesFastScroll({
+  headings,
+  scrollContainerRef,
+  scrollContainerId,
+  linkedScrollContainerRef,
+  linkedScrollContainerId,
+}: NotesFastScrollProps) {
   const [progress, setProgress] = useState(0);
   const [mode, setMode] = useState<InteractionMode>("idle");
   const [currentHeading, setCurrentHeading] = useState(headings[0] ?? null);
@@ -117,6 +125,13 @@ export default function NotesFastScroll({ headings, scrollContainerRef, scrollCo
     const nextTop = ratio * Math.max(0, container.scrollHeight - container.clientHeight);
     const headingIndex = headingIndexAt(nextTop);
     container.scrollTop = nextTop;
+    const linkedContainer = linkedScrollContainerRef?.current;
+    if (linkedContainer) {
+      linkedContainer.scrollTo({
+        top: ratio * Math.max(0, linkedContainer.scrollHeight - linkedContainer.clientHeight),
+        behavior: "auto",
+      });
+    }
     setProgress(ratio);
     setCurrentHeading(headings[headingIndex] ?? headings[0] ?? null);
   };
@@ -193,7 +208,15 @@ export default function NotesFastScroll({ headings, scrollContainerRef, scrollCo
     if (!container || !element) return;
     const containerRect = container.getBoundingClientRect();
     const top = element.getBoundingClientRect().top - containerRect.top + container.scrollTop - 24;
+    const ratio = clamp(top / Math.max(1, container.scrollHeight - container.clientHeight));
     container.scrollTo({ top, behavior: "smooth" });
+    const linkedContainer = linkedScrollContainerRef?.current;
+    if (linkedContainer) {
+      linkedContainer.scrollTo({
+        top: ratio * Math.max(0, linkedContainer.scrollHeight - linkedContainer.clientHeight),
+        behavior: "smooth",
+      });
+    }
   };
 
   const stopDragging = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -217,11 +240,18 @@ export default function NotesFastScroll({ headings, scrollContainerRef, scrollCo
     const container = scrollContainerRef.current;
     if (!container) return;
     const step = event.key === "PageDown" || event.key === "PageUp" ? container.clientHeight * 0.8 : 72;
-    if (event.key === "ArrowDown" || event.key === "PageDown") container.scrollBy({ top: step, behavior: "smooth" });
-    else if (event.key === "ArrowUp" || event.key === "PageUp") container.scrollBy({ top: -step, behavior: "smooth" });
-    else if (event.key === "Home") container.scrollTo({ top: 0, behavior: "smooth" });
-    else if (event.key === "End") container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    const maximum = Math.max(0, container.scrollHeight - container.clientHeight);
+    let nextTop = container.scrollTop;
+    if (event.key === "ArrowDown" || event.key === "PageDown") nextTop += step;
+    else if (event.key === "ArrowUp" || event.key === "PageUp") nextTop -= step;
+    else if (event.key === "Home") nextTop = 0;
+    else if (event.key === "End") nextTop = maximum;
     else return;
+    nextTop = clamp(nextTop, 0, maximum);
+    const ratio = maximum > 0 ? nextTop / maximum : 0;
+    container.scrollTo({ top: nextTop, behavior: "smooth" });
+    const linkedContainer = linkedScrollContainerRef?.current;
+    if (linkedContainer) linkedContainer.scrollTo({ top: ratio * Math.max(0, linkedContainer.scrollHeight - linkedContainer.clientHeight), behavior: "smooth" });
     event.preventDefault();
   };
 
@@ -234,7 +264,7 @@ export default function NotesFastScroll({ headings, scrollContainerRef, scrollCo
       className="notes-fast-scroll-track"
       role="scrollbar"
       aria-label="Fast scroll through note sections"
-      aria-controls={scrollContainerId}
+      aria-controls={`${scrollContainerId}${linkedScrollContainerId ? ` ${linkedScrollContainerId}` : ""}`}
       aria-orientation="vertical"
       aria-valuemin={0}
       aria-valuemax={100}

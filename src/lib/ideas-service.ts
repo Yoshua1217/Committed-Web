@@ -18,6 +18,7 @@ function ideaFromFirestore(id: string, data: Record<string, unknown>): Idea {
     userId: (data.userId as string) ?? "",
     text: (data.text as string) ?? "",
     starred: Boolean(data.starred ?? false),
+    completed: Boolean(data.completed ?? false),
     createdAt: Number(data.createdAt ?? 0),
     updatedAt: Number(data.updatedAt ?? data.createdAt ?? 0),
   };
@@ -66,6 +67,7 @@ export async function createIdea(
     userId,
     text: text.trim(),
     starred,
+    completed: false,
     createdAt: now,
     updatedAt: now,
   };
@@ -77,6 +79,13 @@ export async function createIdea(
 export async function setIdeaStarred(idea: Idea, starred: boolean): Promise<void> {
   await updateDoc(doc(db, COLLECTION_NAME, idea.id), {
     starred,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function setIdeaCompleted(idea: Idea, completed: boolean): Promise<void> {
+  await updateDoc(doc(db, COLLECTION_NAME, idea.id), {
+    completed,
     updatedAt: Date.now(),
   });
 }
