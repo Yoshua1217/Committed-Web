@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import IdeaCapture, { IdeaStarIcon } from "@/components/idea-capture";
 import { useAuth } from "@/lib/auth-context";
 import { setIdeaCompleted, setIdeaStarred, subscribeToIdeas } from "@/lib/ideas-service";
+import ProjectsPanel from "@/components/projects-panel";
 import { Idea } from "@/lib/types";
 
 function formatIdeaDate(timestamp: number): string {
@@ -18,6 +19,7 @@ function formatIdeaDate(timestamp: number): string {
 
 export default function IdeasPage() {
   const { user } = useAuth();
+  const [tab, setTab] = useState<"projects" | "ideas">("projects");
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingIdeaId, setUpdatingIdeaId] = useState<string | null>(null);
@@ -61,11 +63,15 @@ export default function IdeasPage() {
   };
 
   return (
-    <div className="idea-bank-page" style={{ padding: 32, maxWidth: 840 }}>
+    <div className="idea-bank-page" style={{ padding: 32, maxWidth: 1280 }}>
       <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: "0 0 24px" }}>
-        Idea Bank
+        Projects
       </h1>
 
+      <div role="tablist" aria-label="Project sections" className="planning-tabs">
+        {(["projects", "ideas"] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} onClick={() => setTab(item)}>{item === "projects" ? "Projects" : "Idea Bank"}</button>)}
+      </div>
+      {tab === "projects" ? <ProjectsPanel /> : <div role="tabpanel" aria-label="Idea Bank" style={{ maxWidth: 840 }}>
       {user && <IdeaCapture userId={user.uid} autoFocus />}
 
       <div style={{ display: "grid", rowGap: 18 }}>
@@ -163,6 +169,7 @@ export default function IdeasPage() {
           </div>
         )}
       </div>
+      </div>}
     </div>
   );
 }

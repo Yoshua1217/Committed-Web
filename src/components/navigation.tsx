@@ -18,7 +18,7 @@ const navItems: NavItem[] = [
   { label: "Overview", path: "/dashboard/overview", icon: "overview" },
   { label: "Habits", path: "/dashboard/habits", icon: "habit" },
   { label: "Tasks", path: "/dashboard/tasks", icon: "task" },
-  { label: "Ideas", path: "/dashboard/ideas", icon: "idea" },
+  { label: "Projects", path: "/dashboard/ideas", icon: "project" },
   { label: "Tools", path: "/dashboard/tools", icon: "tools" },
   { label: "Workouts", path: "/dashboard/workouts", icon: "workouts" },
   { label: "Notes", path: "/dashboard/notes", icon: "notes" },
@@ -51,6 +51,8 @@ function NavIcon({ icon, active }: { icon: string; active: boolean }) {
           <polyline points="9 22 9 12 15 12 15 22" />
         </svg>
       );
+    case "project":
+      return <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="6" rx="1" /><rect x="14" y="15" width="7" height="6" rx="1" /><path d="M6.5 9v9H14M6.5 12H18V9" /><rect x="14" y="3" width="7" height="6" rx="1" /></svg>;
     case "bucket":
       return (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -15,6 +15,7 @@ const USER_DATA_COLLECTIONS = [
   "habits",
   "habit_completions",
   "tasks",
+  "projects",
   "ideas",
   "note_folders",
   "notes",

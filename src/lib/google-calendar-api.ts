@@ -5,6 +5,8 @@ const CALENDAR_API = "https://www.googleapis.com/calendar/v3";
 export type GuestUpdateMode = "all" | "none";
 
 export type GoogleEventWrite = {
+  id?: string;
+  extendedProperties?: { private: Record<string, string> };
   summary: string;
   start: { dateTime?: string; date?: string; timeZone?: string };
   end: { dateTime?: string; date?: string; timeZone?: string };

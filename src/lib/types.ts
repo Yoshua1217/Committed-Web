@@ -64,6 +64,17 @@ export interface Idea {
   updatedAt: number;
 }
 
+export interface Project {
+  id: string;
+  userId: string;
+  name: string;
+  outcome: string;
+  goalId: string;
+  deadline: string;
+  archived: boolean;
+  createdAt: number;
+}
+
 export interface Task {
   id: string;
   userId: string;
@@ -71,6 +82,12 @@ export interface Task {
   title: string;
   description: string;
   priority: "low" | "medium" | "high" | "critical";
+  projectId?: string;
+  /** Effort estimate; a timed start plus this duration forms the work block. */
+  estimatedMinutes?: number | null;
+  /** Sync-owned fields, never overwritten by task forms. */
+  calendarLink?: { calendarId: string; eventId: string; fingerprint: string } | null;
+  deleted?: boolean;
   goalId: string;
   dueDate: string | null; // "YYYY-MM-DD"
   /** Local date and time selected for beginning the task: "YYYY-MM-DDTHH:mm". */

@@ -1,6 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Task, Project, Goal, Bucket } from "@/lib/types";
+import { saveTask, subscribeToTasks } from "@/lib/tasks-service";
+import { subscribeToProjects } from "@/lib/projects-service";
+import { subscribeToGoals } from "@/lib/goals-service";
+import { subscribeToBuckets } from "@/lib/buckets-service";
+import { taskBlock, localDateTime, taskCalendarFingerprint, isUnscheduledTask } from "@/lib/task-planning";
+import { syncTaskCalendar } from "@/lib/task-calendar-sync";
+import CalendarTaskPlanner, { TaskTimeBlockDialog } from "@/components/calendar-task-planner";
+import TaskEditModal from "@/components/task-edit-modal";
+import TaskDetailsModal from "@/components/task-details-modal";
+import { useTaskCalendarDrop } from "@/components/use-task-calendar-drop";
+import { scheduleDroppedTask, TASK_DRAG_TYPE } from "@/lib/task-calendar-drop";
 import { Haptics } from "@capacitor/haptics";
 import { useAuth } from "@/lib/auth-context";
 import CalendarEventEditorModal, { CalendarEditorPreset, CalendarEventDraft } from "@/components/calendar-event-editor-modal";
@@ -30,6 +42,13 @@ type CalendarView = "week" | "day" | "month";
 
 type GoogleCalendar = SyncedGoogleCalendar;
 type GoogleCalendarEvent = SyncedGoogleCalendarEvent;
+
+function CalendarItemTitle({ event }: { event: GoogleCalendarEvent }) {
+  const title = event.summary ?? "Untitled event";
+  if (event.calendarId !== "committed-tasks") return <>{title}</>;
+  const completed = title.startsWith("✓ ");
+  return <span className="calendar-item-title"><svg className="calendar-task-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="4" /><path d="m6 10 2.6 2.6L14 7" /></svg><span className="calendar-item-title-text">{completed ? title.slice(2) : title}</span></span>;
+}
 
 const HOUR_HEIGHT = 45;
 const TIME_GRID_TOP_OFFSET = 8;
@@ -271,6 +290,29 @@ function MiniCalendar({ selectedDate, onSelect }: { selectedDate: Date; onSelect
 
 export default function CalendarPage() {
   const { user, connectGoogleCalendar } = useAuth();
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [taskGoals, setTaskGoals] = useState<Goal[]>([]);
+  const [taskBuckets, setTaskBuckets] = useState<Bucket[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<"layers" | "unscheduled">("layers");
+  const [showTasks, setShowTasks] = useState(true);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [viewingTaskId, setViewingTaskId] = useState<string | null>(null);
+  const viewingTask = tasks.find((task) => task.id === viewingTaskId && !task.deleted) ?? null;
+  const [schedulingTask, setSchedulingTask] = useState<Task | null>(null);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [savingDroppedTaskId, setSavingDroppedTaskId] = useState<string | null>(null);
+  const taskDropSavingRef = useRef(false);
+  const draggedTask = tasks.find((task) => task.id === draggedTaskId && isUnscheduledTask(task)) ?? null;
+  const [taskSyncError, setTaskSyncError] = useState<string | null>(null);
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    const unsubs = [subscribeToTasks(user.uid, setTasks, true), subscribeToProjects(user.uid, setProjects, (error) => setTaskSyncError(error.message)), subscribeToGoals(user.uid, setTaskGoals), subscribeToBuckets(user.uid, setTaskBuckets)];
+    setShowTasks(localStorage.getItem(`committed-task-layer:${user.uid}`) !== "hidden");
+    return () => unsubs.forEach((unsubscribe) => unsubscribe());
+  }, [user]);
+  const taskSyncKey = tasks.map((task) => `${task.id}:${taskCalendarFingerprint(task)}`).join("|");
   const [view, setView] = useState<CalendarView>("week");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [focusDate, setFocusDate] = useState(() => new Date());
@@ -332,7 +374,16 @@ export default function CalendarPage() {
   const loadGoogleCalendar = useCallback(async (token: string) => {
     const headers = { Authorization: `Bearer ${token}` };
     const calendarResponse = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", { headers });
-    if (!calendarResponse.ok) throw new Error("Google Calendar could not be loaded.");
+    if (!calendarResponse.ok) {
+      let message = "Google Calendar could not be loaded.";
+      try {
+        const payload = await calendarResponse.json() as { error?: { message?: string } };
+        if (payload.error?.message) message = payload.error.message;
+      } catch {
+        // Google occasionally returns an empty error response.
+      }
+      throw new GoogleCalendarApiError(message, calendarResponse.status);
+    }
     const calendarData = await calendarResponse.json() as { items?: GoogleCalendar[] };
     const receivedCalendars = calendarData.items ?? [];
     const preferences = calendarPreferencesRef.current;
@@ -344,6 +395,10 @@ export default function CalendarPage() {
     const start = new Date(focusDate.getFullYear(), focusDate.getMonth() - 1, 1).toISOString();
     const end = new Date(focusDate.getFullYear(), focusDate.getMonth() + 2, 1).toISOString();
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (user && calendarPreferencesRef.current.updatedAt > 0) {
+      try { await syncTaskCalendar(user.uid, token, preferences.featureCalendarMappings.tasks ?? null); setTaskSyncError(null); }
+      catch (error) { setTaskSyncError(`Task sync pending: ${error instanceof Error ? error.message : "Could not sync tasks."} Use Refresh Sync to retry.`); }
+    }
     const eventLists = await Promise.all(nextCalendars.map(async (calendar) => {
       // Request local-time values so calendars configured to return UTC do not
       // appear hours later in the grid.
@@ -366,7 +421,7 @@ export default function CalendarPage() {
           saveCalendarSyncPreferences(user.uid, {
             calendarOrder: nextCalendars.map((calendar) => calendar.id),
             visibleCalendarIds: nextVisibleCalendarIds,
-            featureCalendarMappings: preferences.featureCalendarMappings,
+            featureCalendarMappings: calendarPreferencesRef.current.featureCalendarMappings,
           }),
         ]);
         setSyncError(null);
@@ -437,6 +492,7 @@ export default function CalendarPage() {
     const unsubscribe = subscribeToCalendarSync(user.uid, (preferences, cloudCache) => {
       calendarPreferencesRef.current = preferences;
       setCalendarSyncPreferences(preferences);
+      setPreferencesReady(true);
       const cache = cloudCache ?? localCache;
       if (cache) {
         const syncedCalendars = orderCalendars(cache.calendars, preferences.calendarOrder.length ? preferences.calendarOrder : localOrder);
@@ -467,7 +523,7 @@ export default function CalendarPage() {
       if (tokenStorageKey) sessionStorage.removeItem(tokenStorageKey);
       if (tokenTimeStorageKey) sessionStorage.removeItem(tokenTimeStorageKey);
     });
-  }, [accessToken, loadGoogleCalendar, tokenStorageKey, tokenTimeStorageKey]);
+  }, [accessToken, loadGoogleCalendar, tokenStorageKey, tokenTimeStorageKey, taskSyncKey, preferencesReady, calendarSyncPreferences.featureCalendarMappings.tasks]);
 
   const heading = view === "day"
     ? focusDate.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
@@ -567,13 +623,21 @@ export default function CalendarPage() {
     setEditorState({ event, preset: eventPreset(event) });
   };
 
-  const getWriteAccessToken = async () => {
-    if (accessToken) return accessToken;
-    const token = await connectGoogleCalendar();
+  const saveWriteAccessToken = (token: string) => {
     setAccessToken(token);
     if (tokenStorageKey) sessionStorage.setItem(tokenStorageKey, token);
     if (tokenTimeStorageKey) sessionStorage.setItem(tokenTimeStorageKey, String(Date.now()));
     return token;
+  };
+
+  const getWriteAccessToken = async (forceRefresh = false) => {
+    const storedAt = Number(tokenTimeStorageKey ? sessionStorage.getItem(tokenTimeStorageKey) : 0);
+    if (!forceRefresh && accessToken && storedAt && Date.now() - storedAt < ACCESS_TOKEN_MAX_AGE) return accessToken;
+    setAccessToken(null);
+    if (tokenStorageKey) sessionStorage.removeItem(tokenStorageKey);
+    if (tokenTimeStorageKey) sessionStorage.removeItem(tokenTimeStorageKey);
+    const token = await connectGoogleCalendar();
+    return saveWriteAccessToken(token);
   };
 
   const clearExpiredWriteAccess = () => {
@@ -602,18 +666,27 @@ export default function CalendarPage() {
       }
     }
     try {
-      const token = await getWriteAccessToken();
+      let token = await getWriteAccessToken();
+      const authorized = async <T,>(operation: (currentToken: string) => Promise<T>) => {
+        try {
+          return await operation(token);
+        } catch (error) {
+          if (!(error instanceof GoogleCalendarApiError) || error.status !== 401) throw error;
+          token = await getWriteAccessToken(true);
+          return await operation(token);
+        }
+      };
       const recurringParentId = mutation.event.recurringEventId;
       let targetEvent = mutation.event;
       let targetEventId = mutation.event.id;
 
       if (scope === "series" && recurringParentId) {
-        targetEvent = await getGoogleEvent(token, mutation.event.calendarId, recurringParentId);
+        targetEvent = await authorized((currentToken) => getGoogleEvent(currentToken, mutation.event.calendarId, recurringParentId));
         targetEventId = recurringParentId;
       }
 
       if (mutation.kind === "delete") {
-        await deleteGoogleEvent(token, mutation.event.calendarId, targetEventId, sendUpdates);
+        await authorized((currentToken) => deleteGoogleEvent(currentToken, mutation.event.calendarId, targetEventId, sendUpdates));
       } else {
         let patch = mutation.patch;
         if (scope === "series" && recurringParentId) {
@@ -642,15 +715,15 @@ export default function CalendarPage() {
         if (mutation.destinationCalendarId && mutation.destinationCalendarId !== mutation.event.calendarId) {
           // The following PATCH sends the user's chosen guest update once;
           // suppress a duplicate notification from the intermediate move.
-          const moved = await moveGoogleEvent(token, mutation.event.calendarId, targetEventId, mutation.destinationCalendarId, "none");
+          const moved = await authorized((currentToken) => moveGoogleEvent(currentToken, mutation.event.calendarId, targetEventId, mutation.destinationCalendarId!, "none"));
           destinationCalendarId = mutation.destinationCalendarId;
           targetEventId = moved.id;
           targetEvent = moved;
         }
-        await patchGoogleEvent(token, destinationCalendarId, targetEventId, patch, sendUpdates, targetEvent.etag);
+        await authorized((currentToken) => patchGoogleEvent(currentToken, destinationCalendarId, targetEventId, patch, sendUpdates, targetEvent.etag));
       }
 
-      await loadGoogleCalendar(token);
+      await authorized((currentToken) => loadGoogleCalendar(currentToken));
       setEditorState(null);
       setSelectedEvent(null);
       setCalendarNotice(mutation.kind === "delete" ? "Event deleted from Google Calendar." : "Google Calendar updated.");
@@ -660,7 +733,11 @@ export default function CalendarPage() {
       if (error instanceof GoogleCalendarApiError && error.status === 412 && accessToken) {
         void loadGoogleCalendar(accessToken);
       }
-      const message = error instanceof GoogleCalendarApiError && error.status === 412
+      const message = error instanceof GoogleCalendarApiError && error.status === 401
+        ? "Google Calendar access expired. Reconnect Google Calendar and try again."
+        : error instanceof GoogleCalendarApiError && error.status === 403
+          ? "Google Calendar did not allow that change. Reconnect with event access and try again."
+        : error instanceof GoogleCalendarApiError && error.status === 412
         ? "This event changed in Google Calendar. The latest version has been reloaded."
         : error instanceof Error ? error.message : "Google Calendar could not save that change.";
       setEditorError(message);
@@ -676,6 +753,16 @@ export default function CalendarPage() {
   };
 
   const requestEventMutation = (mutation: EventMutation) => {
+    const task = tasks.find((item) => mutation.event.id === `committed-task:${item.id}`);
+    if (task) {
+      if (mutation.kind === "delete") { setSchedulingTask(task); return; }
+      const start = mutation.patch.start ?? mutation.event.start;
+      const end = mutation.patch.end ?? mutation.event.end;
+      const minutes = start?.dateTime && end?.dateTime ? Math.round((new Date(end.dateTime).getTime() - new Date(start.dateTime).getTime()) / 60_000) : task.estimatedMinutes;
+      if (minutes != null && minutes <= 0) return;
+      void saveTask({ ...task, startDateTime: start?.dateTime ? localDateTime(new Date(start.dateTime)) : start?.date ? `${start.date}T00:00` : null, startAllDay: !!start?.date, estimatedMinutes: minutes ?? null }).catch((error) => setCalendarNotice(error.message));
+      return;
+    }
     const repeats = Boolean(mutation.event.recurringEventId || mutation.event.recurrence?.length);
     if (repeats) setEventActionPrompt({ kind: "recurrence", mutation });
     else continueEventMutation(mutation, "occurrence");
@@ -687,14 +774,28 @@ export default function CalendarPage() {
       setSavingEvent(true);
       setEditorError(null);
       try {
-        const token = await getWriteAccessToken();
-        await insertGoogleEvent(token, draft.calendarId, eventWriteFromDraft(draft));
-        await loadGoogleCalendar(token);
+        let token = await getWriteAccessToken();
+        const authorized = async <T,>(operation: (currentToken: string) => Promise<T>) => {
+          try {
+            return await operation(token);
+          } catch (error) {
+            if (!(error instanceof GoogleCalendarApiError) || error.status !== 401) throw error;
+            token = await getWriteAccessToken(true);
+            return await operation(token);
+          }
+        };
+        await authorized((currentToken) => insertGoogleEvent(currentToken, draft.calendarId, eventWriteFromDraft(draft)));
+        await authorized((currentToken) => loadGoogleCalendar(currentToken));
         setEditorState(null);
         setCalendarNotice("Event created in Google Calendar.");
       } catch (error) {
         if (error instanceof GoogleCalendarApiError && (error.status === 401 || error.status === 403)) clearExpiredWriteAccess();
-        setEditorError(error instanceof Error ? error.message : "Google Calendar could not create that event.");
+        const message = error instanceof GoogleCalendarApiError && error.status === 401
+          ? "Google Calendar access expired. Reconnect Google Calendar and try again."
+          : error instanceof GoogleCalendarApiError && error.status === 403
+            ? "Google Calendar did not allow that change. Reconnect with event access and try again."
+            : error instanceof Error ? error.message : "Google Calendar could not create that event.";
+        setEditorError(message);
       } finally {
         setSavingEvent(false);
       }
@@ -708,7 +809,44 @@ export default function CalendarPage() {
     });
   };
 
-  const visibleEvents = events.filter((event) => visibleCalendarIds.includes(event.calendarId));
+  const taskCalendar: GoogleCalendar = { id: "committed-tasks", summary: "Tasks", backgroundColor: "#6e9fdb", accessRole: "owner" };
+  const taskEvents: GoogleCalendarEvent[] = tasks.filter((task) => !task.deleted && !task.archived && task.type === "task").flatMap((task) => {
+    const block = taskBlock(task);
+    const day = task.startDateTime?.split("T")[0] ?? task.dueDateTime?.split("T")[0] ?? task.dueDate;
+    if (!block && !day) return [];
+    return [{ id: `committed-task:${task.id}`, calendarId: taskCalendar.id, locked: !block, summary: `${task.completed ? "✓ " : ""}${task.title}`, description: task.description, color: task.completed ? "#65816f" : taskCalendar.backgroundColor,
+      start: block ? { dateTime: block.start.toISOString() } : { date: day! },
+      end: block ? { dateTime: block.end.toISOString() } : { date: addIsoDateDays(day!, 1) } }];
+  });
+  const visibleEvents = [...events.filter((event) => visibleCalendarIds.includes(event.calendarId) && !tasks.some((task) => task.calendarLink?.eventId === event.id && task.calendarLink?.calendarId === event.calendarId)), ...(showTasks ? taskEvents : [])];
+  const displayCalendars = [...calendars, taskCalendar];
+  const selectCalendarEvent = (event: GoogleCalendarEvent) => {
+    const task = tasks.find((item) => event.id === `committed-task:${item.id}`);
+    if (task) setViewingTaskId(task.id);
+    else setSelectedEvent(event);
+  };
+
+  const dropTaskAtTime = async (taskId: string, start: Date) => {
+    setDraggedTaskId(null);
+    if (taskDropSavingRef.current) return;
+    const task = tasks.find((item) => item.id === taskId);
+    if (!task || !user) return;
+    taskDropSavingRef.current = true;
+    setSavingDroppedTaskId(taskId);
+    setTaskSyncError(null);
+    try {
+      const scheduled = scheduleDroppedTask(task, start);
+      setShowTasks(true);
+      localStorage.setItem(`committed-task-layer:${user.uid}`, "visible");
+      await saveTask(scheduled);
+      setCalendarNotice(calendarSyncPreferences.featureCalendarMappings.tasks ? "Task scheduled. Google sync will run when connected." : "Task scheduled on your calendar.");
+    } catch (error) {
+      setTaskSyncError(error instanceof Error ? error.message : "Could not schedule task. Please try again.");
+    } finally {
+      taskDropSavingRef.current = false;
+      setSavingDroppedTaskId(null);
+    }
+  };
 
   return (
     <div className="committed-calendar-page">
@@ -739,9 +877,16 @@ export default function CalendarPage() {
         <aside className={`calendar-sidebar${mobileSidebarOpen ? " is-open" : ""}`} role={mobileSidebarOpen ? "dialog" : undefined} aria-modal={mobileSidebarOpen || undefined} aria-label={mobileSidebarOpen ? "Calendars and settings" : undefined}>
           <div className="calendar-mobile-sidebar-header"><div><span className="material-symbols-rounded" aria-hidden="true">calendar_month</span><span><strong>Calendar</strong><small>Layers &amp; settings</small></span></div><button type="button" aria-label="Close calendars and settings" onClick={() => setMobileSidebarOpen(false)}><span className="material-symbols-rounded">close</span></button></div>
           <button className="calendar-create-button" onClick={() => openCreateEditor()}><span className="material-symbols-rounded">add</span>Create</button>
+          <div className="planning-tabs calendar-planning-tabs" role="tablist" aria-label="Calendar sidebar">
+            <button role="tab" aria-selected={sidebarTab === "layers"} onClick={() => setSidebarTab("layers")}>Calendars</button>
+            <button role="tab" aria-selected={sidebarTab === "unscheduled"} onClick={() => setSidebarTab("unscheduled")}>Unscheduled <span>{tasks.filter(isUnscheduledTask).length}</span></button>
+          </div>
+          {taskSyncError && <p className="planning-error" role="alert">{taskSyncError}</p>}
+          {sidebarTab === "unscheduled" ? <CalendarTaskPlanner tasks={tasks} projects={projects} draggedTaskId={draggedTaskId} savingTaskId={savingDroppedTaskId} onTaskDrag={(task) => setDraggedTaskId(task?.id ?? null)} onEdit={(task) => { setEditingTask(task); setMobileSidebarOpen(false); }} onSchedule={(task) => { setSchedulingTask(task); setMobileSidebarOpen(false); }} /> : <>
           <MiniCalendar selectedDate={focusDate} onSelect={(date) => { setFocusDate(date); setMobileSidebarOpen(false); }} />
           <section className="calendar-layers">
             <p>My calendars</p>
+            <label className="calendar-layer"><input type="checkbox" checked={showTasks} onChange={(event) => { setShowTasks(event.target.checked); if (user) localStorage.setItem(`committed-task-layer:${user.uid}`, event.target.checked ? "visible" : "hidden"); }} style={{ accentColor: "#6e9fdb" }} />Tasks</label>
             {calendars.length === 0
               ? <span className="calendar-empty-layers">{syncError ?? "Connect Google Calendar to see your schedule."}</span>
               : calendars.map((calendar) => <label className="calendar-layer" key={calendar.id} draggable onDragStart={() => setDraggedCalendarId(calendar.id)} onDragEnd={() => setDraggedCalendarId(null)} onDragOver={(dragEvent) => dragEvent.preventDefault()} onDrop={() => { if (draggedCalendarId) moveCalendar(draggedCalendarId, calendar.id); setDraggedCalendarId(null); }} style={{ opacity: draggedCalendarId === calendar.id ? 0.55 : 1 }}>
@@ -761,17 +906,22 @@ export default function CalendarPage() {
               <span>{label}</span>
               <select value={calendarSyncPreferences.featureCalendarMappings[feature] ?? ""} onChange={(event) => setFeatureCalendarMapping(feature, event.target.value || null)} style={{ width: "100%", padding: "7px 8px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--surface-variant)", color: "var(--primary)", fontSize: 12 }}>
                 <option value="">Not mapped</option>
-                {calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.summary}{calendar.primary ? " (primary)" : ""}</option>)}
+                {(feature === "tasks" ? writableCalendars : calendars).map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.summary}{calendar.primary ? " (primary)" : ""}</option>)}
               </select>
             </label>)}
           </section>}
+          <p className="planning-muted" style={{ fontSize: 11, marginTop: 16 }}>Task blocks sync to the mapped Google calendar while this page is open. Connect Google and choose “Task schedules” to enable syncing.</p>
+          </>}
         </aside>
         <main className="calendar-main">
           {view === "month"
-            ? <MonthView focusDate={focusDate} events={visibleEvents} calendars={calendars} onSelectEvent={setSelectedEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} />
-            : <TimeGrid view={view} days={view === "day" ? [focusDate] : weekDays} events={visibleEvents} calendars={calendars} onSelectEvent={setSelectedEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} onSwipeDay={move} />}
+            ? <MonthView focusDate={focusDate} events={visibleEvents} calendars={displayCalendars} onSelectEvent={selectCalendarEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} draggedTask={draggedTask} onTaskDrop={(task, date) => { setDraggedTaskId(null); setFocusDate(date); setSchedulingTask(task); setMobileSidebarOpen(false); }} />
+            : <TimeGrid view={view} days={view === "day" ? [focusDate] : weekDays} events={visibleEvents} calendars={displayCalendars} onSelectEvent={selectCalendarEvent} onCreateEvent={openCreateEditor} onRequestMutation={requestEventMutation} onSwipeDay={move} draggedTask={draggedTask} onTaskDrop={(id, start) => void dropTaskAtTime(id, start)} />}
         </main>
       </div>
+      {schedulingTask && <TaskTimeBlockDialog key={schedulingTask.id} task={tasks.find((task) => task.id === schedulingTask.id) ?? schedulingTask} date={focusDate} onClose={() => setSchedulingTask(null)} onEdit={() => { setEditingTask(schedulingTask); setSchedulingTask(null); }} onSave={async (task) => { await saveTask(task); if (task.startDateTime) setFocusDate(new Date(task.startDateTime)); setCalendarNotice(calendarSyncPreferences.featureCalendarMappings.tasks ? "Task saved. Google sync will run when connected." : "Task saved to your calendar."); }} />}
+      <TaskEditModal isOpen={editingTask !== null} task={editingTask} onClose={() => setEditingTask(null)} onSave={saveTask} goals={taskGoals} buckets={taskBuckets} userId={user?.uid ?? ""} nextSortOrder={tasks.length} />
+      <TaskDetailsModal isOpen={!!viewingTask} task={viewingTask} goals={taskGoals} buckets={taskBuckets} onClose={() => setViewingTaskId(null)} onEdit={() => { setEditingTask(viewingTask); setViewingTaskId(null); }} />
       {selectedEvent && <CalendarEventModal event={selectedEvent} calendar={calendars.find((calendar) => calendar.id === selectedEvent.calendarId)} onClose={() => setSelectedEvent(null)} onEdit={isEventWritable(selectedEvent, calendars.find((calendar) => calendar.id === selectedEvent.calendarId)) ? () => openEditEditor(selectedEvent) : undefined} />}
       {editorState && <CalendarEventEditorModal event={editorState.event} preset={editorState.preset} calendars={writableCalendars} saving={savingEvent} error={editorError} onClose={() => !savingEvent && setEditorState(null)} onSave={(draft) => void saveEditorEvent(draft)} onDelete={editorState.event ? () => requestEventMutation({ kind: "delete", event: editorState.event! }) : undefined} />}
       {eventActionPrompt && <CalendarActionPrompt prompt={eventActionPrompt} onCancel={() => setEventActionPrompt(null)} onOccurrence={(mutation) => continueEventMutation(mutation, "occurrence")} onSeries={(mutation) => continueEventMutation(mutation, "series")} onGuests={(mutation, scope, sendUpdates) => void executeEventMutation(mutation, scope, sendUpdates)} />}
@@ -780,7 +930,7 @@ export default function CalendarPage() {
   );
 }
 
-function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent, onRequestMutation, onSwipeDay }: { view: CalendarView; days: Date[]; events: GoogleCalendarEvent[]; calendars: GoogleCalendar[]; onSelectEvent: (event: GoogleCalendarEvent) => void; onCreateEvent: (preset: CalendarEditorPreset) => void; onRequestMutation: (mutation: EventMutation) => void; onSwipeDay: (direction: number) => void }) {
+function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent, onRequestMutation, onSwipeDay, draggedTask, onTaskDrop }: { view: CalendarView; days: Date[]; events: GoogleCalendarEvent[]; calendars: GoogleCalendar[]; onSelectEvent: (event: GoogleCalendarEvent) => void; onCreateEvent: (preset: CalendarEditorPreset) => void; onRequestMutation: (mutation: EventMutation) => void; onSwipeDay: (direction: number) => void; draggedTask: Task | null; onTaskDrop: (taskId: string, start: Date) => void }) {
   const [now, setNow] = useState(() => new Date());
   const [creationPreview, setCreationPreview] = useState<{ start: Date; end: Date } | null>(null);
   const [eventPreview, setEventPreview] = useState<{ key: string; start: Date; end: Date } | null>(null);
@@ -788,6 +938,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
   const [daySwipeSettling, setDaySwipeSettling] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const columnsRef = useRef<HTMLDivElement>(null);
+  const taskDrop = useTaskCalendarDrop({ task: draggedTask, days, columnsRef, scrollRef: scrollContainerRef, hourHeight: HOUR_HEIGHT, onDrop: onTaskDrop });
   const headerRef = useRef<HTMLDivElement>(null);
   const creationGestureRef = useRef<{ pointerId: number; startSlot: Date; moved: boolean; startX: number; startY: number } | null>(null);
   const eventGestureRef = useRef<{ pointerId: number; event: GoogleCalendarEvent; mode: "move" | "start" | "end"; startSlot: Date; originalStart: Date; originalEnd: Date; moved: boolean; activated: boolean; isTouch: boolean; longPressTimer: number | null; target: HTMLElement; startX: number; startY: number } | null>(null);
@@ -1140,7 +1291,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
           const isLastDay = addIsoDateDays(event.end?.date ?? addIsoDateDays(event.start!.date!, 1), -1) === dateKey(day);
           return <button type="button" className="calendar-all-day-header-event" key={`${event.calendarId}-${event.id}`} onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "move")} onPointerMove={updateAllDayGesture} onPointerUp={finishAllDayGesture} onPointerCancel={() => { allDayGestureRef.current = null; }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!suppressEventClickRef.current) onSelectEvent(event); }} style={{ width: "100%", minHeight: 16, overflow: "hidden", marginTop: 1, padding: "1px 8px", border: 0, borderRadius: 4, background: mutedCalendarColor(event.color), color: "#121820", cursor: editable ? "grab" : "pointer", touchAction: editable ? "none" : undefined, fontSize: 9, fontWeight: 750, lineHeight: "14px", textAlign: "left", textOverflow: "ellipsis", whiteSpace: "nowrap", filter: hasAllDayEventPassed(event, now) ? "brightness(.72) saturate(.82)" : undefined, opacity: hasAllDayEventPassed(event, now) ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
             {editable && isFirstDay && <span className="calendar-all-day-resize start" onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "start")} />}
-            <span className="calendar-all-day-title">{event.summary ?? "Untitled event"}</span>
+            <span className="calendar-all-day-title"><CalendarItemTitle event={event} /></span>
             {editable && isLastDay && <span className="calendar-all-day-resize end" onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "end")} />}
           </button>;
         })}
@@ -1153,11 +1304,16 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
           {Array.from({ length: days.length }, (_, index) => <span key={index} style={{ position: "absolute", top: TIME_GRID_TOP_OFFSET - GRID_TICK_LENGTH, left: `calc(var(--calendar-time-axis) + (100% - var(--calendar-time-axis)) * ${index / days.length})`, width: 1, height: GRID_TICK_LENGTH, background: "var(--calendar-border)" }} />)}
         </div>
         <div className="calendar-hours" style={{ position: "relative", zIndex: 4, background: "var(--calendar-panel)" }}>{HOURS.map((hour, index) => <span key={hour} style={{ top: index === 0 ? 0 : (hour - HOURS[0]) * HOUR_HEIGHT, paddingLeft: 3, background: "var(--calendar-panel)" }}><span className="calendar-hour-full">{shortTime(hour)}</span><span className="calendar-hour-mobile">{hour % 12 || 12}{hour >= 12 ? "p" : "a"}</span></span>)}</div>
-        <div className="calendar-columns" ref={columnsRef} onPointerDown={startGridCreation} onPointerMove={updateGridCreation} onPointerUp={finishGridCreation} onPointerCancel={() => { creationGestureRef.current = null; setCreationPreview(null); }}>
+        <div className="calendar-columns" ref={columnsRef} {...taskDrop.handlers} onPointerDown={startGridCreation} onPointerMove={updateGridCreation} onPointerUp={finishGridCreation} onPointerCancel={() => { creationGestureRef.current = null; setCreationPreview(null); }}>
           {days.map((day) => {
             const isToday = dateKey(day) === today;
             return <div className="calendar-day-column" key={dateKey(day)}>
               {HOURS.map((hour) => <div className="calendar-hour-line" key={hour} />)}
+              {taskDrop.preview && draggedTask && (() => {
+                const placeholder: GoogleCalendarEvent = { id: "task-drop-preview", calendarId: "preview", start: { dateTime: taskDrop.preview.start.toISOString() }, end: { dateTime: taskDrop.preview.end.toISOString() } };
+                const segment = segmentForDay(placeholder, day);
+                return segment ? <div className="calendar-creation-preview calendar-task-drop-preview" style={{ top: segment.top, height: segment.height }}><strong>{draggedTask.title}</strong><span>{eventTimeRange(placeholder)}</span></div> : null;
+              })()}
               {creationPreview && (() => {
                 const placeholder: GoogleCalendarEvent = { id: "creation-preview", calendarId: "preview", start: { dateTime: creationPreview.start.toISOString() }, end: { dateTime: creationPreview.end.toISOString() } };
                 const segment = segmentForDay(placeholder, day);
@@ -1170,7 +1326,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
                 const editable = isEventWritable(event, calendars.find((calendar) => calendar.id === event.calendarId));
                 return <button type="button" className={`google-calendar-event${editable ? " editable" : ""}${eventPreview?.key === `${event.calendarId}-${event.id}` ? " dragging" : ""}`} key={`${event.calendarId}-${event.id}-${dateKey(day)}`} onClick={() => { if (!suppressEventClickRef.current) onSelectEvent(event); }} onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "move")} onPointerMove={updateEventGesture} onPointerUp={finishEventGesture} onPointerCancel={cancelEventGesture} style={{ top: segment.top, height: segment.height, background: mutedCalendarColor(event.color), filter: isPast ? "brightness(.72) saturate(.82)" : undefined, opacity: isPast ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
                   {editable && segment.beginsHere && <span className="calendar-resize-handle top" onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "start")} />}
-                  <strong>{event.summary ?? "Untitled event"}</strong>
+                  <strong><CalendarItemTitle event={event} /></strong>
                   {segment.height >= 48 && <span className="calendar-event-time">{eventTimeRange({ ...event, start: { ...event.start, dateTime: segment.start.toISOString() }, end: { ...event.end, dateTime: segment.end.toISOString() } })}</span>}
                   {segment.height >= 68 && event.location && <span className="calendar-event-location">{event.location}</span>}
                   {editable && segment.endsHere && <span className="calendar-resize-handle bottom" onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "end")} />}
@@ -1236,8 +1392,9 @@ function CalendarActionPrompt({ prompt, onCancel, onOccurrence, onSeries, onGues
   </div>;
 }
 
-function MonthView({ focusDate, events, calendars, onSelectEvent, onCreateEvent, onRequestMutation }: { focusDate: Date; events: GoogleCalendarEvent[]; calendars: GoogleCalendar[]; onSelectEvent: (event: GoogleCalendarEvent) => void; onCreateEvent: (preset: CalendarEditorPreset) => void; onRequestMutation: (mutation: EventMutation) => void }) {
+function MonthView({ focusDate, events, calendars, onSelectEvent, onCreateEvent, onRequestMutation, draggedTask, onTaskDrop }: { focusDate: Date; events: GoogleCalendarEvent[]; calendars: GoogleCalendar[]; onSelectEvent: (event: GoogleCalendarEvent) => void; onCreateEvent: (preset: CalendarEditorPreset) => void; onRequestMutation: (mutation: EventMutation) => void; draggedTask: Task | null; onTaskDrop: (task: Task, date: Date) => void }) {
   const [draggedEvent, setDraggedEvent] = useState<{ event: GoogleCalendarEvent; sourceDay: Date } | null>(null);
+  const [taskHover, setTaskHover] = useState<{ id: string; day: string } | null>(null);
   const monthStart = new Date(focusDate.getFullYear(), focusDate.getMonth(), 1);
   const gridStart = addDays(monthStart, -((monthStart.getDay() + 6) % 7));
   const days = Array.from({ length: 42 }, (_, index) => addDays(gridStart, index));
@@ -1264,11 +1421,12 @@ function MonthView({ focusDate, events, calendars, onSelectEvent, onCreateEvent,
           }
           setDraggedEvent(null);
         };
-        return <div className={`calendar-month-cell ${day.getMonth() !== focusDate.getMonth() ? "muted" : ""}`} key={key} onClick={() => onCreateEvent({ start: new Date(`${key}T00:00:00`), end: new Date(`${addIsoDateDays(key, 1)}T00:00:00`), allDay: true })} onDragOver={(dragEvent) => { if (draggedEvent) dragEvent.preventDefault(); }} onDrop={(dragEvent) => { dragEvent.preventDefault(); dropEvent(); }}>
+        return <div className={`calendar-month-cell ${day.getMonth() !== focusDate.getMonth() ? "muted" : ""}${draggedTask && taskHover?.id === draggedTask.id && taskHover.day === key ? " task-drop-target" : ""}`} key={key} onClick={() => onCreateEvent({ start: new Date(`${key}T00:00:00`), end: new Date(`${addIsoDateDays(key, 1)}T00:00:00`), allDay: true })} onDragOver={(dragEvent) => { if (draggedTask && dragEvent.dataTransfer.types.includes(TASK_DRAG_TYPE)) { dragEvent.preventDefault(); dragEvent.dataTransfer.dropEffect = "move"; setTaskHover({ id: draggedTask.id, day: key }); } else if (draggedEvent) dragEvent.preventDefault(); }} onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setTaskHover(null); }} onDrop={(dragEvent) => { dragEvent.preventDefault(); setTaskHover(null); if (draggedTask && dragEvent.dataTransfer.getData(TASK_DRAG_TYPE) === draggedTask.id) { onTaskDrop(draggedTask, day); } else dropEvent(); }}>
           <span className={key === today ? "today" : ""}>{day.getDate()}</span>
+          {draggedTask && taskHover?.id === draggedTask.id && taskHover.day === key && <div className="calendar-month-task-preview"><strong>{draggedTask.title}</strong><span>Drop to choose time</span></div>}
           {events.filter((event) => event.start && (event.start.date ? allDayEventOccursOn(event, day) : dateKey(new Date(event.start.dateTime!)) === key)).slice(0, 3).map((event) => {
             const editable = isEventWritable(event, calendars.find((calendar) => calendar.id === event.calendarId));
-            return <button type="button" draggable={editable} className="google-calendar-month-event" key={`${event.calendarId}-${event.id}`} onClick={(clickEvent) => { clickEvent.stopPropagation(); onSelectEvent(event); }} onDragStart={(dragEvent) => { dragEvent.stopPropagation(); setDraggedEvent({ event, sourceDay: day }); }} onDragEnd={() => setDraggedEvent(null)} style={{ width: "100%", borderTop: 0, borderRight: 0, borderBottom: 0, borderLeftColor: event.color ?? "#4285f4", background: "transparent", cursor: editable ? "grab" : "pointer", textAlign: "left" }}>{event.summary ?? "Untitled event"}</button>;
+return <button type="button" draggable={editable} className="google-calendar-month-event" key={`${event.calendarId}-${event.id}`} onClick={(clickEvent) => { clickEvent.stopPropagation(); onSelectEvent(event); }} onDragStart={(dragEvent) => { dragEvent.stopPropagation(); setDraggedEvent({ event, sourceDay: day }); }} onDragEnd={() => setDraggedEvent(null)} style={{ width: "100%", borderTop: 0, borderRight: 0, borderBottom: 0, borderLeftColor: event.color ?? "#4285f4", background: "transparent", cursor: editable ? "grab" : "pointer", textAlign: "left" }}><CalendarItemTitle event={event} /></button>;
           })}
         </div>;
       })}

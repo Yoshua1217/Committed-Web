@@ -1,5 +1,7 @@
 import { db } from "@/lib/firebase";
-import { Task } from "@/lib/types";
+import { Project, Task } from "@/lib/types";
+import { subscribeToProjects } from "@/lib/projects-service";
+import { taskGoalId } from "@/lib/task-planning";
 import {
   collection,
   query,
@@ -7,12 +9,12 @@ import {
   onSnapshot,
   doc,
   setDoc,
-  deleteDoc,
+  runTransaction,
 } from "firebase/firestore";
 
 const COLLECTION_NAME = "tasks";
 
-function taskFromFirestore(id: string, data: Record<string, unknown>): Task {
+export function taskFromFirestore(id: string, data: Record<string, unknown>): Task {
   return {
     id,
     userId: (data.userId as string) ?? "",
@@ -21,6 +23,10 @@ function taskFromFirestore(id: string, data: Record<string, unknown>): Task {
     description: (data.description as string) ?? "",
     priority: (data.priority as Task["priority"]) ?? "medium",
     goalId: (data.goalId as string) ?? "",
+    projectId: (data.projectId as string) ?? "",
+    estimatedMinutes: typeof data.estimatedMinutes === "number" && data.estimatedMinutes > 0 ? data.estimatedMinutes : null,
+    calendarLink: (data.calendarLink as Task["calendarLink"]) ?? null,
+    deleted: Boolean(data.deleted),
     dueDate: (data.dueDate as string) ?? null,
     startDateTime: (data.startDateTime as string) ?? null,
     dueDateTime: (data.dueDateTime as string) ?? null,
@@ -37,36 +43,54 @@ function taskFromFirestore(id: string, data: Record<string, unknown>): Task {
 
 export function subscribeToTasks(
   userId: string,
-  callback: (tasks: Task[]) => void
+  callback: (tasks: Task[]) => void,
+  includeDeleted = false,
 ): () => void {
   const q = query(
     collection(db, COLLECTION_NAME),
     where("userId", "==", userId)
   );
 
-  return onSnapshot(
+  let tasks: Task[] | null = null;
+  let projects: Project[] = [];
+  const publish = () => {
+    if (tasks) callback(tasks.map((task) => ({ ...task, goalId: taskGoalId(task, projects) })));
+  };
+  const unsubscribeProjects = subscribeToProjects(userId, (items) => {
+    projects = items;
+    publish();
+  });
+  const unsubscribeTasks = onSnapshot(
     q,
     (snapshot) => {
-      const tasks: Task[] = snapshot.docs
+      tasks = snapshot.docs
         .map((d) => taskFromFirestore(d.id, d.data() as Record<string, unknown>))
+        .filter((task) => includeDeleted || !task.deleted)
         .sort((a, b) => a.sortOrder - b.sortOrder);
-      callback(tasks);
+      publish();
     },
     (error) => {
       console.error("subscribeToTasks error:", error);
+      tasks = [];
       callback([]);
     }
   );
+  return () => { unsubscribeTasks(); unsubscribeProjects(); };
 }
 
 export async function saveTask(task: Task): Promise<void> {
-  await setDoc(doc(db, COLLECTION_NAME, task.id), {
+  if (task.estimatedMinutes != null && (!Number.isInteger(task.estimatedMinutes) || task.estimatedMinutes <= 0)) {
+    throw new Error("Enter a positive whole number of minutes.");
+  }
+  const data = {
     userId: task.userId,
     type: task.type,
     title: task.title,
     description: task.description,
     priority: task.priority,
     goalId: task.goalId,
+    projectId: task.projectId ?? "",
+    estimatedMinutes: task.estimatedMinutes ?? null,
     dueDate: task.dueDate,
     startDateTime: task.startDateTime,
     dueDateTime: task.dueDateTime,
@@ -78,7 +102,21 @@ export async function saveTask(task: Task): Promise<void> {
     archived: task.archived,
     sortOrder: task.sortOrder,
     createdAt: task.createdAt,
-  });
+  };
+  const ref = doc(db, COLLECTION_NAME, task.id);
+  if (task.projectId) {
+    // Read inside the transaction so a project edit cannot leave a newly saved
+    // task with an outdated goal. Every task entry point goes through here.
+    await runTransaction(db, async (transaction) => {
+      const project = await transaction.get(doc(db, "projects", task.projectId!));
+      if (!project.exists() || project.data().userId !== task.userId) {
+        throw new Error("This project is unavailable. Choose another project or remove the project selection.");
+      }
+      transaction.set(ref, { ...data, goalId: project.data().goalId ?? "" }, { merge: true });
+    });
+  } else {
+    await setDoc(ref, data, { merge: true });
+  }
 }
 
 export async function completeTask(task: Task): Promise<void> {
@@ -100,5 +138,12 @@ export async function uncompleteTask(task: Task): Promise<void> {
 }
 
 export async function deleteTask(taskId: string): Promise<void> {
-  await deleteDoc(doc(db, COLLECTION_NAME, taskId));
+  const ref = doc(db, COLLECTION_NAME, taskId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) return;
+    // Keep linked deletions retryable, even when Google is disconnected.
+    if (snapshot.data().calendarLink) transaction.update(ref, { deleted: true });
+    else transaction.delete(ref);
+  });
 }

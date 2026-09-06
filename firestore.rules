@@ -40,6 +40,12 @@ service cloud.firestore {
       allow update: if isOwner(resource.data) && isOwner(request.resource.data);
     }
 
+    match /projects/{documentId} {
+      allow create: if isOwner(request.resource.data);
+      allow read, delete: if isOwner(resource.data);
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+    }
+
     match /ideas/{documentId} {
       allow create: if isOwner(request.resource.data);
       allow read, delete: if isOwner(resource.data);
