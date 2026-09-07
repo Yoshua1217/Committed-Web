@@ -64,15 +64,35 @@ export async function patchGoogleEvent(
   sendUpdates: GuestUpdateMode,
   etag?: string,
 ) {
+  const body = {
+    ...patch,
+    // PATCH merges nested objects. Clear the opposite time representation when
+    // switching between timed and all-day events so Google never sees both.
+    ...(patch.start ? { start: patch.start.date ? { ...patch.start, dateTime: null, timeZone: null } : { ...patch.start, date: null } } : {}),
+    ...(patch.end ? { end: patch.end.date ? { ...patch.end, dateTime: null, timeZone: null } : { ...patch.end, date: null } } : {}),
+  };
   return calendarRequest<SyncedGoogleCalendarEvent>(token, `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?${updatesQuery(sendUpdates)}&conferenceDataVersion=1`, {
     method: "PATCH",
     headers: etag ? { "If-Match": etag } : undefined,
-    body: JSON.stringify(patch),
+    body: JSON.stringify(body),
   });
 }
 
 export async function getGoogleEvent(token: string, calendarId: string, eventId: string) {
   return calendarRequest<SyncedGoogleCalendarEvent>(token, `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
+}
+
+export async function listGoogleEvents(token: string, calendarId: string, timeMin: string, timeMax: string, timeZone: string) {
+  const events: SyncedGoogleCalendarEvent[] = [];
+  let pageToken: string | undefined;
+  do {
+    const query = new URLSearchParams({ singleEvents: "true", orderBy: "startTime", timeMin, timeMax, timeZone, maxResults: "2500" });
+    if (pageToken) query.set("pageToken", pageToken);
+    const page = await calendarRequest<{ items?: SyncedGoogleCalendarEvent[]; nextPageToken?: string }>(token, `/calendars/${encodeURIComponent(calendarId)}/events?${query}`);
+    events.push(...(page.items ?? []).filter((event) => event.status !== "cancelled"));
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return events;
 }
 
 export async function deleteGoogleEvent(

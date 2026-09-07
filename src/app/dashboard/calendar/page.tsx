@@ -16,6 +16,7 @@ import { scheduleDroppedTask, TASK_DRAG_TYPE } from "@/lib/task-calendar-drop";
 import { Haptics } from "@capacitor/haptics";
 import { useAuth } from "@/lib/auth-context";
 import CalendarEventEditorModal, { CalendarEditorPreset, CalendarEventDraft } from "@/components/calendar-event-editor-modal";
+import { eventPatchFromDraft, eventWriteFromDraft } from "@/lib/calendar-event-write";
 import {
   CalendarSyncPreferences,
   EMPTY_CALENDAR_SYNC_PREFERENCES,
@@ -34,6 +35,7 @@ import {
   deleteGoogleEvent,
   getGoogleEvent,
   insertGoogleEvent,
+  listGoogleEvents,
   moveGoogleEvent,
   patchGoogleEvent,
 } from "@/lib/google-calendar-api";
@@ -76,13 +78,6 @@ function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function parseLocalDateTime(value: string) {
-  const [datePart, timePart = "00:00"] = value.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute] = timePart.split(":").map(Number);
-  return new Date(year, month - 1, day, hour, minute);
-}
-
 function addIsoDateDays(value: string, amount: number) {
   const date = new Date(`${value}T12:00:00`);
   date.setDate(date.getDate() + amount);
@@ -93,26 +88,6 @@ function calendarDayDifference(from: Date, to: Date) {
   const fromUtc = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
   const toUtc = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
   return Math.round((toUtc - fromUtc) / 86_400_000);
-}
-
-function eventWriteFromDraft(draft: CalendarEventDraft): GoogleEventWrite {
-  if (draft.allDay) {
-    return {
-      summary: draft.summary,
-      start: { date: draft.startDate },
-      end: { date: addIsoDateDays(draft.endDate, 1) },
-      location: draft.location,
-      description: draft.description,
-    };
-  }
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  return {
-    summary: draft.summary,
-    start: { dateTime: parseLocalDateTime(`${draft.startDate}T${draft.startTime}`).toISOString(), timeZone },
-    end: { dateTime: parseLocalDateTime(`${draft.endDate}T${draft.endTime}`).toISOString(), timeZone },
-    location: draft.location,
-    description: draft.description,
-  };
 }
 
 function isCalendarWritable(calendar?: GoogleCalendar) {
@@ -402,10 +377,8 @@ export default function CalendarPage() {
     const eventLists = await Promise.all(nextCalendars.map(async (calendar) => {
       // Request local-time values so calendars configured to return UTC do not
       // appear hours later in the grid.
-      const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendar.id)}/events?singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(start)}&timeMax=${encodeURIComponent(end)}&timeZone=${encodeURIComponent(timeZone)}&conferenceDataVersion=1`, { headers });
-      if (!response.ok) return [] as GoogleCalendarEvent[];
-      const data = await response.json() as { items?: Omit<GoogleCalendarEvent, "calendarId" | "color">[] };
-      return (data.items ?? []).map((event) => ({ ...event, calendarId: calendar.id, color: calendar.backgroundColor }));
+      const items = await listGoogleEvents(token, calendar.id, start, end, timeZone);
+      return items.map((event) => ({ ...event, calendarId: calendar.id, color: calendar.backgroundColor }));
     }));
     const nextEvents = eventLists.flat();
     setEvents(nextEvents);
@@ -646,6 +619,30 @@ export default function CalendarPage() {
     if (tokenTimeStorageKey) sessionStorage.removeItem(tokenTimeStorageKey);
   };
 
+  const openSeriesEditor = async () => {
+    const instance = editorState?.event;
+    if (!instance?.recurringEventId || savingEvent) return;
+    setSavingEvent(true);
+    setEditorError(null);
+    try {
+      let token = await getWriteAccessToken();
+      let parent: GoogleCalendarEvent;
+      try { parent = await getGoogleEvent(token, instance.calendarId, instance.recurringEventId); }
+      catch (error) {
+        if (!(error instanceof GoogleCalendarApiError) || error.status !== 401) throw error;
+        token = await getWriteAccessToken(true);
+        parent = await getGoogleEvent(token, instance.calendarId, instance.recurringEventId);
+      }
+      parent = { ...parent, calendarId: instance.calendarId, color: instance.color };
+      if (!isEventWritable(parent, calendars.find((calendar) => calendar.id === parent.calendarId))) throw new Error("This series cannot be edited with your current calendar permissions.");
+      setEditorState({ event: parent, preset: eventPreset(parent) });
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : "Could not load the repeat settings. Try again.");
+    } finally {
+      setSavingEvent(false);
+    }
+  };
+
   const executeEventMutation = async (mutation: EventMutation, scope: "occurrence" | "series", sendUpdates: GuestUpdateMode) => {
     setEventActionPrompt(null);
     setSavingEvent(true);
@@ -690,12 +687,15 @@ export default function CalendarPage() {
       } else {
         let patch = mutation.patch;
         if (scope === "series" && recurringParentId) {
+          if (mutation.patch.start && Boolean(mutation.patch.start.date) !== Boolean(mutation.event.start?.date)) {
+            throw new Error("To change the entire series between timed and all-day events, open Edit series & repeat settings first.");
+          }
           const instanceStart = mutation.event.start;
           const instanceEnd = mutation.event.end;
           const proposedStart = mutation.patch.start;
           const proposedEnd = mutation.patch.end;
           const instanceStartDate = instanceStart?.dateTime ? new Date(instanceStart.dateTime) : new Date(`${instanceStart?.date}T12:00:00`);
-          const proposedStartDate = proposedStart?.dateTime ? new Date(proposedStart.dateTime) : new Date(`${proposedStart?.date ?? instanceStart?.date}T12:00:00`);
+          const proposedStartDate = !proposedStart ? instanceStartDate : proposedStart.dateTime ? new Date(proposedStart.dateTime) : new Date(`${proposedStart.date}T12:00:00`);
           const startMilliseconds = proposedStart?.dateTime && instanceStart?.dateTime ? new Date(proposedStart.dateTime).getTime() - new Date(instanceStart.dateTime).getTime() : 0;
           const endMilliseconds = proposedEnd?.dateTime && instanceEnd?.dateTime ? new Date(proposedEnd.dateTime).getTime() - new Date(instanceEnd.dateTime).getTime() : 0;
           const startDayDelta = calendarDayDifference(instanceStartDate, proposedStartDate);
@@ -763,8 +763,8 @@ export default function CalendarPage() {
       void saveTask({ ...task, startDateTime: start?.dateTime ? localDateTime(new Date(start.dateTime)) : start?.date ? `${start.date}T00:00` : null, startAllDay: !!start?.date, estimatedMinutes: minutes ?? null }).catch((error) => setCalendarNotice(error.message));
       return;
     }
-    const repeats = Boolean(mutation.event.recurringEventId || mutation.event.recurrence?.length);
-    if (repeats) setEventActionPrompt({ kind: "recurrence", mutation });
+    if (mutation.event.recurringEventId) setEventActionPrompt({ kind: "recurrence", mutation });
+    else if (mutation.event.recurrence?.length) continueEventMutation(mutation, "series");
     else continueEventMutation(mutation, "occurrence");
   };
 
@@ -801,12 +801,16 @@ export default function CalendarPage() {
       }
       return;
     }
-    requestEventMutation({
-      kind: "patch",
-      event: editorState.event,
-      patch: eventWriteFromDraft(draft),
-      destinationCalendarId: draft.calendarId,
-    });
+    try {
+      requestEventMutation({
+        kind: "patch",
+        event: editorState.event,
+        patch: eventPatchFromDraft(draft, editorState.event),
+        destinationCalendarId: draft.calendarId,
+      });
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : "Check the event schedule.");
+    }
   };
 
   const taskCalendar: GoogleCalendar = { id: "committed-tasks", summary: "Tasks", backgroundColor: "#6e9fdb", accessRole: "owner" };
@@ -923,7 +927,7 @@ export default function CalendarPage() {
       <TaskEditModal isOpen={editingTask !== null} task={editingTask} onClose={() => setEditingTask(null)} onSave={saveTask} goals={taskGoals} buckets={taskBuckets} userId={user?.uid ?? ""} nextSortOrder={tasks.length} />
       <TaskDetailsModal isOpen={!!viewingTask} task={viewingTask} goals={taskGoals} buckets={taskBuckets} onClose={() => setViewingTaskId(null)} onEdit={() => { setEditingTask(viewingTask); setViewingTaskId(null); }} />
       {selectedEvent && <CalendarEventModal event={selectedEvent} calendar={calendars.find((calendar) => calendar.id === selectedEvent.calendarId)} onClose={() => setSelectedEvent(null)} onEdit={isEventWritable(selectedEvent, calendars.find((calendar) => calendar.id === selectedEvent.calendarId)) ? () => openEditEditor(selectedEvent) : undefined} />}
-      {editorState && <CalendarEventEditorModal event={editorState.event} preset={editorState.preset} calendars={writableCalendars} saving={savingEvent} error={editorError} onClose={() => !savingEvent && setEditorState(null)} onSave={(draft) => void saveEditorEvent(draft)} onDelete={editorState.event ? () => requestEventMutation({ kind: "delete", event: editorState.event! }) : undefined} />}
+      {editorState && <CalendarEventEditorModal key={editorState.event?.id ?? "new"} event={editorState.event} preset={editorState.preset} calendars={writableCalendars} saving={savingEvent || Boolean(eventActionPrompt)} error={editorError} onClose={() => !savingEvent && !eventActionPrompt && setEditorState(null)} onSave={(draft) => void saveEditorEvent(draft)} onEditSeries={() => void openSeriesEditor()} onDelete={editorState.event ? () => requestEventMutation({ kind: "delete", event: editorState.event! }) : undefined} />}
       {eventActionPrompt && <CalendarActionPrompt prompt={eventActionPrompt} onCancel={() => setEventActionPrompt(null)} onOccurrence={(mutation) => continueEventMutation(mutation, "occurrence")} onSeries={(mutation) => continueEventMutation(mutation, "series")} onGuests={(mutation, scope, sendUpdates) => void executeEventMutation(mutation, scope, sendUpdates)} />}
       {calendarNotice && <div className="calendar-notice" role="status">{calendarNotice}</div>}
     </div>
@@ -1374,7 +1378,7 @@ function CalendarEventModal({ event, calendar, onClose, onEdit }: { event: Googl
 
 function CalendarActionPrompt({ prompt, onCancel, onOccurrence, onSeries, onGuests }: { prompt: EventActionPrompt; onCancel: () => void; onOccurrence: (mutation: EventMutation) => void; onSeries: (mutation: EventMutation) => void; onGuests: (mutation: EventMutation, scope: "occurrence" | "series", sendUpdates: GuestUpdateMode) => void }) {
   const deleting = prompt.mutation.kind === "delete";
-  return <div role="presentation" onMouseDown={onCancel} style={{ position: "fixed", zIndex: 94, inset: 0, display: "grid", placeItems: "center", padding: 22, background: "rgba(0,0,0,.72)" }}>
+  return <div role="presentation" onMouseDown={onCancel} style={{ position: "fixed", zIndex: 240, inset: 0, display: "grid", placeItems: "center", padding: 22, background: "rgba(0,0,0,.72)" }}>
     <section role="dialog" aria-modal="true" aria-label={prompt.kind === "recurrence" ? "Choose repeating event scope" : "Choose guest notifications"} onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ width: "min(410px, 100%)", padding: 21, border: "1px solid var(--border)", borderRadius: 19, background: "var(--surface)", boxShadow: "0 22px 58px rgba(0,0,0,.48)" }}>
       <h3 style={{ margin: "0 0 7px", color: "var(--primary)", fontSize: 19 }}>{prompt.kind === "recurrence" ? `${deleting ? "Delete" : "Change"} repeating event` : "Notify guests?"}</h3>
       <p style={{ margin: "0 0 18px", color: "var(--secondary)", fontSize: 13, lineHeight: 1.45 }}>{prompt.kind === "recurrence" ? "Choose how much of this repeating event Google Calendar should update." : "This event has guests. Choose whether Google Calendar should send them an update."}</p>

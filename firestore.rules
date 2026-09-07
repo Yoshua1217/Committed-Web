@@ -15,6 +15,89 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/habits/$(habitId)).data.userId == request.auth.uid;
     }
 
+    // Validate the local calendar day using the server clock.
+    function localDay(offset) {
+      let time = request.time + duration.value(offset, 'm');
+      return string(time.year()) + '-'
+        + (time.month() < 10 ? '0' : '') + string(time.month()) + '-'
+        + (time.day() < 10 ? '0' : '') + string(time.day());
+    }
+
+    function validOffset(data) {
+      return data.utcOffsetMinutes is int
+        && data.utcOffsetMinutes >= -720 && data.utcOffsetMinutes <= 840;
+    }
+
+    function resettingHabits() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/userSettings/$(request.auth.uid)).data.get('resettingHabits', false) == true;
+    }
+
+    function unchangedDefinition(version) {
+      return version.get('createdOn', '') == request.resource.data.get('createdOn', '')
+        && version.get('id', "") == request.resource.data.id
+        && version.get('userId', "") == resource.data.get('userId', "")
+        && version.get('name', "") == resource.data.get('name', "")
+        && version.get('iconName', "") == resource.data.get('iconName', "")
+        && version.get('bucketId', "") == resource.data.get('bucketId', "")
+        && version.get('goalId', "") == resource.data.get('goalId', "")
+        && version.get('completionType', "checkbox") == resource.data.get('completionType', "checkbox")
+        && version.get('counterIncrement', 1) == resource.data.get('counterIncrement', 1)
+        && version.get('counterGoal', 10) == resource.data.get('counterGoal', 10)
+        && version.get('timerGoalSeconds', 300) == resource.data.get('timerGoalSeconds', 300)
+        && version.get('reminderTime', null) == resource.data.get('reminderTime', null)
+        && version.get('sortOrder', 0) == resource.data.get('sortOrder', 0)
+        && version.get('createdAt', 0) == resource.data.get('createdAt', 0)
+        && version.get('pausePeriods', []) == resource.data.get('pausePeriods', [])
+        && version.get('deletedOn', null) == resource.data.get('deletedOn', null)
+        && version.get('monday', true) == (resource.data.get('monday', true) != false && resource.data.get('monday', true) != 0)
+        && version.get('tuesday', true) == (resource.data.get('tuesday', true) != false && resource.data.get('tuesday', true) != 0)
+        && version.get('wednesday', true) == (resource.data.get('wednesday', true) != false && resource.data.get('wednesday', true) != 0)
+        && version.get('thursday', true) == (resource.data.get('thursday', true) != false && resource.data.get('thursday', true) != 0)
+        && version.get('friday', true) == (resource.data.get('friday', true) != false && resource.data.get('friday', true) != 0)
+        && version.get('saturday', true) == (resource.data.get('saturday', true) != false && resource.data.get('saturday', true) != 0)
+        && version.get('sunday', true) == (resource.data.get('sunday', true) != false && resource.data.get('sunday', true) != 0);
+    }
+
+    function validHabitHistory() {
+      let previous = resource.data.get('history', {});
+      let next = request.resource.data.history;
+      let date = request.resource.data.effectiveFrom;
+      let difference = next.diff(previous);
+      return validOffset(request.resource.data)
+        && date == localDay(request.resource.data.utcOffsetMinutes)
+        && resource.data.get('deletedOn', null) == null
+        && request.resource.data.createdAt == resource.data.get('createdAt', 0)
+        && request.resource.data.get('createdOn', '') == resource.data.get('createdOn', request.resource.data.get('createdOn', ''))
+        && (request.resource.data.deletedOn == null || request.resource.data.deletedOn == date)
+        && difference.changedKeys().size() == 0
+        && difference.removedKeys().size() == 0
+        && difference.addedKeys().hasOnly([date])
+        && (resource.data.get('effectiveFrom', '') == date
+          ? next == previous
+          : (resource.data.get('effectiveFrom', '') < date && date in next && unchangedDefinition(next[date])));
+    }
+
+    // Explicit corrections can change results, including for a retained deleted habit.
+    // Creation dates still prevent today's new habits from being added to yesterday.
+    function historicalCompletion(data) {
+      let habit = get(/databases/$(database)/documents/habits/$(data.habitId)).data;
+      return data.get('manualHistoryEdit', false) == true
+        && validOffset(data)
+        && data.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        && data.date <= localDay(data.utcOffsetMinutes)
+        && data.date >= habit.get('createdOn', '0000-01-01')
+        && (habit.get('deletedOn', null) == null || data.date < habit.deletedOn);
+    }
+
+    function writableCompletion(data) {
+      return validOffset(data) && data.date == localDay(data.utcOffsetMinutes)
+        && data.dayEndsAt is int
+        && data.dayEndsAt > request.time.toMillis()
+        && data.dayEndsAt <= (request.time + duration.value(26, 'h')).toMillis()
+        && get(/databases/$(database)/documents/habits/$(data.habitId)).data.get('deletedOn', null) == null;
+    }
+
     // Every document in these collections carries its owner's Firebase Auth UID.
     match /buckets/{documentId} {
       allow create: if isOwner(request.resource.data);
@@ -29,9 +112,17 @@ service cloud.firestore {
     }
 
     match /habits/{documentId} {
-      allow create: if isOwner(request.resource.data);
-      allow read, delete: if isOwner(resource.data);
-      allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+      allow create: if isOwner(request.resource.data)
+        && validOffset(request.resource.data)
+        && request.resource.data.effectiveFrom == localDay(request.resource.data.utcOffsetMinutes)
+        && request.resource.data.createdOn == request.resource.data.effectiveFrom
+        && request.resource.data.history == {}
+        && request.resource.data.deletedOn == null;
+      allow list: if isOwner(resource.data);
+      // A creation transaction first reads its not-yet-existing document.
+      allow get: if (isSignedIn() && resource == null) || isOwner(resource.data);
+      allow delete: if isOwner(resource.data) && resettingHabits();
+      allow update: if isOwner(resource.data) && isOwner(request.resource.data) && validHabitHistory();
     }
 
     match /tasks/{documentId} {
@@ -68,11 +159,18 @@ service cloud.firestore {
     // belong to that user so a completion cannot be attached to another account.
     match /habit_completions/{documentId} {
       allow create: if isOwner(request.resource.data)
-        && ownsHabit(request.resource.data.habitId);
-      allow read, delete: if isOwner(resource.data);
+        && ownsHabit(request.resource.data.habitId)
+        && (historicalCompletion(request.resource.data) || writableCompletion(request.resource.data));
+      allow list: if isOwner(resource.data);
+      allow get: if (isSignedIn() && resource == null) || isOwner(resource.data);
+      allow delete: if isOwner(resource.data) && resettingHabits();
       allow update: if isOwner(resource.data)
         && isOwner(request.resource.data)
-        && ownsHabit(request.resource.data.habitId);
+        && ownsHabit(request.resource.data.habitId)
+        && request.resource.data.habitId == resource.data.habitId
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.dayEndsAt == resource.data.get('dayEndsAt', request.resource.data.dayEndsAt)
+        && (historicalCompletion(request.resource.data) || writableCompletion(request.resource.data));
     }
 
     match /workouts/{documentId} {

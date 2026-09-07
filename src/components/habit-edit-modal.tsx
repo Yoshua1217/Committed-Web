@@ -13,8 +13,8 @@ function argbToHex(argb: number): string {
 interface HabitEditModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (habit: Habit) => void;
-  onDelete?: (habitId: string) => void;
+  onSave: (habit: Habit) => void | Promise<void>;
+  onDelete?: (habitId: string) => void | Promise<void>;
   habit?: Habit | null;
   goals: Goal[];
   buckets: Bucket[];
@@ -70,6 +70,8 @@ export default function HabitEditModal({
   const [counterIncrement, setCounterIncrement] = useState(1);
   const [counterGoal, setCounterGoal] = useState(10);
   const [timerMinutes, setTimerMinutes] = useState(5);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [days, setDays] = useState({
     monday: true, tuesday: true, wednesday: true, thursday: true,
@@ -83,6 +85,7 @@ export default function HabitEditModal({
   useEffect(() => {
     if (isOpen) {
       setConfirmingDelete(false);
+      setSaveError("");
       if (habit) {
         setName(habit.name);
         setGoalId(habit.goalId || "");
@@ -165,8 +168,8 @@ export default function HabitEditModal({
     return null;
   };
 
-  const handleSave = () => {
-    if (!name.trim()) return;
+  const handleSave = async () => {
+    if (!name.trim() || saving) return;
     // Validate reminder time first
     const tErr = validateReminderTime();
     if (tErr) {
@@ -203,16 +206,26 @@ export default function HabitEditModal({
       userId: habit?.userId ?? userId,
       pausePeriods: habit?.pausePeriods ?? [],
     };
-    onSave(saved);
-    onClose();
+    setSaving(true); setSaveError("");
+    try {
+      await onSave(saved);
+      onClose();
+    } catch {
+      setSaveError("Could not save the habit. Check your connection and try again.");
+    } finally { setSaving(false); }
   };
 
-  const handleDelete = () => {
-    if (habit && onDelete) {
-      onDelete(habit.id);
+  const handleDelete = async () => {
+    if (!habit || !onDelete || saving) return;
+    setSaving(true); setSaveError("");
+    try {
+      await onDelete(habit.id);
       setConfirmingDelete(false);
       onClose();
-    }
+    } catch {
+      setConfirmingDelete(false);
+      setSaveError("Could not delete the habit. Check your connection and try again.");
+    } finally { setSaving(false); }
   };
 
   return (
@@ -529,6 +542,7 @@ export default function HabitEditModal({
                 </button>
               )}
             </div>
+            {saveError && <p role="alert" style={{ color: "var(--error)", fontSize: 13 }}>{saveError}</p>}
             {timeError && (
               <div
                 style={{
@@ -553,7 +567,7 @@ export default function HabitEditModal({
             <button
               type="button"
               onClick={handleSave}
-              disabled={!name.trim()}
+              disabled={!name.trim() || saving}
               style={{
                 width: "100%",
                 padding: 16,
@@ -644,7 +658,7 @@ export default function HabitEditModal({
                 Delete &ldquo;{habit?.name}&rdquo;?
               </h3>
               <p style={{ fontSize: 13, color: "var(--secondary)", margin: "0 0 24px", lineHeight: 1.5 }}>
-                This will permanently remove this habit and cannot be undone.
+                This removes the habit from today and future days. Past days and their percentages are preserved.
               </p>
               <div style={{ display: "flex", gap: 10 }}>
                 <button
@@ -667,6 +681,7 @@ export default function HabitEditModal({
                 <button
                   type="button"
                   onClick={handleDelete}
+                  disabled={saving}
                   style={{
                     flex: 1,
                     padding: 12,

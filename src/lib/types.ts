@@ -41,11 +41,24 @@ export interface Habit {
   createdAt: number;
   userId: string;
   pausePeriods: { startedOn: string; endedOn: string | null }[];
+  /** Local creation date, captured once so travel cannot move the start day. */
+  createdOn?: string;
+  /** Current definition applies from this date; earlier definitions are frozen. */
+  effectiveFrom?: string;
+  deletedOn?: string | null;
+  /** Each key is the exclusive end date of the saved definition. */
+  history?: Record<string, HabitDefinition>;
 }
+
+export type HabitDefinition = Omit<Habit, "history">;
 
 export interface HabitCompletion {
   id: string;
   habitId: string;
+  utcOffsetMinutes?: number; // Current offset for server local-date validation
+  dayEndsAt?: number; // Original next local midnight, including DST transitions
+  manualHistoryEdit?: boolean; // Explicit correction in the day editor
+  includedInDay?: boolean; // Keep an originally counted habit in the day when unchecked
   date: string; // ISO format "2026-03-03"
   completed: boolean;
   counterValue: number;
@@ -241,6 +254,22 @@ export interface WorkoutSetLog {
   weightLbs: number | null;
   reps: number | null;
   completed: boolean;
+  kind?: "working" | "warmup";
+}
+
+export type ExerciseEffort = "easier" | "about_right" | "harder";
+export interface ExerciseCoachingBaseline {
+  sessionId: string;
+  completedAt: number;
+  loadType: ExerciseLoadType;
+  plannedReps: number;
+  effort: ExerciseEffort | null;
+  sets: WorkoutSetLog[];
+}
+export interface ExerciseCoaching {
+  version: 1;
+  previous: ExerciseCoachingBaseline | null;
+  earlier: ExerciseCoachingBaseline | null;
 }
 
 export interface WorkoutExerciseLog {
@@ -251,7 +280,14 @@ export interface WorkoutExerciseLog {
   sortOrder: number;
   plannedSets: number;
   plannedReps: number;
+  /** Added while logging, without changing the saved routine. */
+  addedDuringSession?: boolean;
   sets: WorkoutSetLog[];
+  effort?: ExerciseEffort | null;
+  /** The actual available load step, entered by the user, never guessed. */
+  weightIncrementLbs?: number | null;
+  /** Frozen pre-session evidence; prevents targets changing while logging. */
+  coaching?: ExerciseCoaching;
 }
 
 /** A frozen stretch entry keeps completed routines readable if the catalogue later changes. */
@@ -267,10 +303,12 @@ export interface StretchRoutineLog {
 export interface WorkoutPersonalRecordEvent {
   exerciseId: string;
   exerciseNameSnapshot: string;
-  reps: number;
+  weightLbs: number;
+  reps: number | null;
+  previousBestWeightLbs: number | null;
   previousBestReps: number | null;
-  /** IDs of the logged sets that established this session's best rep record. */
-  setIds?: string[];
+  /** Highest weight, then highest reps; exact ties highlight only the first set. */
+  setIds: [string];
 }
 
 export interface WorkoutSession {
@@ -280,6 +318,10 @@ export interface WorkoutSession {
   sessionType: WorkoutSessionType;
   workoutId: string;
   workoutNameSnapshot: string;
+  /** Previous training sessions use an entered duration instead of live timers. */
+  entryMode?: "previous";
+  /** Actual session end time for a previous training draft. */
+  performedAt?: number;
   /** Activity-only snapshots keep history useful if the catalogue changes later. */
   activityId?: string;
   activityCategorySnapshot?: string;
@@ -299,6 +341,10 @@ export interface WorkoutSession {
   status: WorkoutSessionStatus;
   personalRecords: WorkoutPersonalRecordEvent[];
   exercises: WorkoutExerciseLog[];
+  /** Frozen Prev values from the historical workout used to start this session. */
+  repeatPreviousExercises?: WorkoutExerciseLog[];
+  /** Set count in the saved routine before this session was shortened. */
+  adjustedFromSetCount?: number;
   createdAt: number;
   updatedAt: number;
 }

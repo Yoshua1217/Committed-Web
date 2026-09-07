@@ -1,6 +1,8 @@
 "use client";
 
+import WorkoutDebrief from "@/components/workout-debrief";
 import MaterialIcon from "@/components/material-icon";
+import WorkoutPersonalRecordsDropdown from "@/components/workout-personal-records-dropdown";
 import { WorkoutSession } from "@/lib/types";
 
 interface WorkoutCompletionSummaryProps {
@@ -38,15 +40,16 @@ export default function WorkoutCompletionSummary({ session, onDone, onViewHistor
         <div style={{ padding: "15px 8px", border: "1px solid var(--border)", borderRadius: 15, background: "var(--surface)" }}><MaterialIcon name="fitness_center" size={19} color="#2e9a5b" /><strong style={{ display: "block", color: "var(--primary)", fontSize: 18, fontWeight: 850, marginTop: 7 }}>{completedExercises}</strong><span style={{ display: "block", color: "var(--secondary)", fontSize: 11, fontWeight: 700, marginTop: 3 }}>EXERCISES</span></div>
       </section>
 
-      {session.personalRecords.length > 0 && <section style={{ width: "100%", marginTop: 15, padding: "15px 16px", border: "1px solid #f5c84c65", borderRadius: 16, background: "#f5c84c10", textAlign: "left" }}><div className="flex items-center" style={{ gap: 7, color: "#d69e13", marginBottom: 9 }}><span style={{ width: 28, height: 28, display: "grid", placeItems: "center", borderRadius: 9, background: "#f5c84c20" }}><MaterialIcon name="emoji_events" size={18} /></span><div><h2 style={{ fontSize: 15, margin: 0 }}>New personal record{session.personalRecords.length === 1 ? "" : "s"}</h2><p style={{ color: "var(--secondary)", fontSize: 12, margin: "2px 0 0" }}>You raised the bar today.</p></div></div><div className="flex flex-wrap" style={{ gap: 6 }}>{session.personalRecords.map((record) => <span key={record.exerciseId} style={{ padding: "6px 8px", borderRadius: 8, background: "var(--surface)", color: "var(--primary)", fontSize: 12, fontWeight: 750 }}>{record.exerciseNameSnapshot} · {record.reps} reps</span>)}</div></section>}
+      <WorkoutPersonalRecordsDropdown key={session.id} records={session.personalRecords} />
+      <WorkoutDebrief session={session} />
 
       <section style={{ width: "100%", marginTop: 24, textAlign: "left" }}>
         <h2 style={{ color: "var(--primary)", fontSize: 17, margin: "0 0 11px" }}>Logged exercises</h2>
-        <div className="flex flex-col" style={{ gap: 10 }}>
+        <div className="flex flex-col" style={{ gap: 22 }}>
           {session.exercises.slice().sort((a, b) => a.sortOrder - b.sortOrder).filter((exercise) => exercise.sets.some((set) => set.completed)).map((exercise, exerciseIndex) => <article key={exercise.exerciseId} style={{ padding: 13, border: "1px solid var(--border)", borderRadius: 15, background: "var(--surface)" }}>
             <div className="flex items-center" style={{ gap: 9, marginBottom: 10 }}><span style={{ width: 25, height: 25, display: "grid", placeItems: "center", borderRadius: 8, background: "var(--surface-variant)", color: "var(--secondary)", fontSize: 11, fontWeight: 850 }}>{exerciseIndex + 1}</span><h3 style={{ color: "var(--primary)", fontSize: 15, margin: 0 }}>{exercise.exerciseNameSnapshot}</h3></div>
             <div className="completed-set-grid completed-set-heading"><span>Set</span><span>Weight</span><span>Reps</span><span>Status</span></div>
-            {exercise.sets.map((set, setIndex) => { if (!set.completed) return null; const isRecord = session.personalRecords.some((record) => record.exerciseId === exercise.exerciseId && ((record.setIds?.includes(set.id) ?? false) || (!record.setIds && record.reps === set.reps))); return <div key={set.id} className="completed-set-grid completed-set-row" style={{ minHeight: 34, padding: "5px 7px", border: isRecord ? "1px solid #f5c84c" : undefined, background: isRecord ? "#f5c84c12" : undefined }}><span>{setIndex + 1}</span><span>{exercise.loadType === "bodyweight" ? "BW" : set.weightLbs ?? "—"}</span><span>{set.reps ?? "—"}</span><span style={{ color: isRecord ? "#d69e13" : "#2e9a5b", fontWeight: 850 }}>{isRecord ? <span className="flex items-center justify-center" style={{ gap: 3 }}><MaterialIcon name="emoji_events" size={14} />PR</span> : "Done"}</span></div>; })}
+            {exercise.sets.map((set, setIndex) => { if (!set.completed) return null; const isRecord = session.personalRecords.some((record) => record.exerciseId === exercise.exerciseId && record.setIds[0] === set.id); return <div key={set.id} className="completed-set-grid completed-set-row" style={{ minHeight: 34, padding: "5px 7px", border: isRecord ? "1px solid #f5c84c40" : undefined, background: isRecord ? "linear-gradient(#f5c84c08, #f5c84c08), var(--surface, #111)" : undefined }}><span>{setIndex + 1}</span><span>{exercise.loadType === "bodyweight" ? "BW" : set.weightLbs ?? "—"}</span><span>{set.reps ?? "—"}</span><span style={{ color: isRecord ? "#d69e13" : "#2e9a5b", fontWeight: 850 }}>{isRecord ? <span className="flex items-center justify-center" style={{ gap: 3 }}><MaterialIcon name="emoji_events" size={14} />PR</span> : "Done"}</span></div>; })}
           </article>)}
         </div>
       </section>

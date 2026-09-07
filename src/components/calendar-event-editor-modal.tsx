@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { SyncedGoogleCalendar, SyncedGoogleCalendarEvent } from "@/lib/calendar-sync-service";
 import MaterialIcon from "@/components/material-icon";
+import CalendarRepeatPicker from "@/components/calendar-repeat-picker";
+import { buildRecurrence, defaultRepeat, readRecurrence, selectRepeatPreset, zonedValues } from "@/lib/calendar-recurrence";
 
 export type CalendarEditorPreset = {
   start: Date;
@@ -21,6 +23,8 @@ export type CalendarEventDraft = {
   endTime: string;
   location: string;
   description: string;
+  timeZone: string;
+  recurrence?: string[];
 };
 
 function pad(value: number) {
@@ -69,22 +73,27 @@ function initialDraft(event: SyncedGoogleCalendarEvent | null, preset: CalendarE
       endTime: localTimeValue(preset.end),
       location: "",
       description: "",
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
   }
   const allDay = Boolean(event.start?.date);
   const start = event.start?.dateTime ? new Date(event.start.dateTime) : new Date(`${event.start?.date ?? localDateValue(preset.start)}T12:00:00`);
   const exclusiveEnd = event.end?.dateTime ? new Date(event.end.dateTime) : new Date(`${event.end?.date ?? event.start?.date ?? localDateValue(preset.end)}T12:00:00`);
   const displayEnd = allDay ? addDays(exclusiveEnd, -1) : exclusiveEnd;
+  const timeZone = event.start?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zonedStart = zonedValues(start, timeZone);
+  const zonedEnd = zonedValues(displayEnd, timeZone);
   return {
     summary: event.summary ?? "",
     calendarId: event.calendarId,
     allDay,
-    startDate: localDateValue(start),
-    startTime: localTimeValue(start),
-    endDate: localDateValue(displayEnd),
-    endTime: localTimeValue(displayEnd),
+    startDate: allDay ? localDateValue(start) : zonedStart.date,
+    startTime: zonedStart.time,
+    endDate: allDay ? localDateValue(displayEnd) : zonedEnd.date,
+    endTime: zonedEnd.time,
     location: event.location ?? "",
     description: event.description ?? "",
+    timeZone,
   };
 }
 
@@ -265,6 +274,7 @@ export default function CalendarEventEditorModal({
   onClose,
   onSave,
   onDelete,
+  onEditSeries,
 }: {
   event: SyncedGoogleCalendarEvent | null;
   preset: CalendarEditorPreset;
@@ -274,8 +284,11 @@ export default function CalendarEventEditorModal({
   onClose: () => void;
   onSave: (draft: CalendarEventDraft) => void;
   onDelete?: () => void;
+  onEditSeries?: () => void;
 }) {
   const [draft, setDraft] = useState(() => initialDraft(event, preset, calendars));
+  const [repeat, setRepeat] = useState(() => readRecurrence(event?.recurrence, draft.startDate, draft.timeZone));
+  const [repeatChanged, setRepeatChanged] = useState(false);
   const [schedulePickerOpen, setSchedulePickerOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -284,14 +297,17 @@ export default function CalendarEventEditorModal({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnEscape = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === "Escape" && !saving) onClose();
+      if (keyboardEvent.key !== "Escape" || saving) return;
+      if (deleteConfirmOpen) setDeleteConfirmOpen(false);
+      else if (schedulePickerOpen) setSchedulePickerOpen(false);
+      else onClose();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [onClose, saving]);
+  }, [onClose, saving, deleteConfirmOpen, schedulePickerOpen]);
 
   const update = <K extends keyof CalendarEventDraft>(key: K, value: CalendarEventDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -306,19 +322,26 @@ export default function CalendarEventEditorModal({
     const end = draft.allDay ? `${draft.endDate}T23:59` : `${draft.endDate}T${draft.endTime}`;
     if (!draft.allDay && (!draft.startTime || !draft.endTime)) return setValidationError("Choose both times.");
     if (end <= start) return setValidationError("The event must end after it starts.");
-    onSave({ ...draft, summary: draft.summary.trim(), location: draft.location.trim(), description: draft.description.trim() });
+    try {
+      const recurrence = !event?.recurringEventId && (!event || repeatChanged)
+        ? buildRecurrence(repeat ?? defaultRepeat(draft.startDate), draft.startDate, draft.allDay, draft.timeZone)
+        : undefined;
+      onSave({ ...draft, recurrence, summary: draft.summary.trim(), location: draft.location.trim(), description: draft.description.trim() });
+    } catch (cause) {
+      setValidationError(cause instanceof Error ? cause.message : "Check the repeat settings.");
+    }
   };
 
   const changingCalendarUnsupported = Boolean(event?.recurringEventId || event?.recurrence?.length || (event?.eventType && event.eventType !== "default"));
 
   const modal = <div className="calendar-event-editor-backdrop" role="presentation" onMouseDown={() => !saving && onClose()} style={{ position: "fixed", zIndex: 200, inset: 0, display: "grid", placeItems: "center", overflowX: "hidden", overflowY: "auto", padding: 16, background: "rgba(0,0,0,.68)" }}>
-    <section className="calendar-event-editor" role="dialog" aria-modal="true" aria-labelledby="calendar-editor-title" onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ width: "min(500px, calc(100vw - 32px))", minWidth: 0, maxWidth: 500, boxSizing: "border-box", overflow: "hidden", margin: "auto", padding: 19, border: "1px solid var(--border)", borderRadius: 20, background: "var(--surface)", boxShadow: "0 24px 65px rgba(0,0,0,.48)" }}>
+    <section className="calendar-event-editor" role="dialog" aria-modal="true" aria-labelledby="calendar-editor-title" onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ width: "min(500px, calc(100vw - 32px))", minWidth: 0, maxWidth: 500, maxHeight: "calc(100dvh - 32px)", boxSizing: "border-box", overflowX: "hidden", overflowY: "auto", margin: "auto", padding: 19, border: "1px solid var(--border)", borderRadius: 20, background: "var(--surface)", boxShadow: "0 24px 65px rgba(0,0,0,.48)" }}>
       <header style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
-        <div><p style={{ margin: "0 0 4px", color: "var(--secondary)", fontSize: 10, fontWeight: 850, letterSpacing: ".08em", textTransform: "uppercase" }}>{event ? "Edit Google event" : "New Google event"}</p><h2 id="calendar-editor-title" style={{ margin: 0, color: "var(--primary)", fontSize: 22 }}>{event ? "Event details" : "Create event"}</h2></div>
+        <div><p style={{ margin: "0 0 4px", color: "var(--secondary)", fontSize: 10, fontWeight: 850, letterSpacing: ".08em", textTransform: "uppercase" }}>{event?.recurrence?.length ? "Edit entire Google series" : event ? "Edit Google event" : "New Google event"}</p><h2 id="calendar-editor-title" style={{ margin: 0, color: "var(--primary)", fontSize: 22 }}>{event ? "Event details" : "Create event"}</h2></div>
         <button type="button" onClick={onClose} disabled={saving} aria-label="Close event editor" style={{ width: 36, height: 36, display: "grid", placeItems: "center", border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface-variant)", color: "var(--primary)", cursor: "pointer" }}><span className="material-symbols-rounded">close</span></button>
       </header>
 
-      <div style={{ display: "grid", minWidth: 0, gap: 11 }}>
+      <fieldset disabled={saving} style={{ display: "grid", minWidth: 0, gap: 11, margin: 0, padding: 0, border: 0 }}>
         <label style={labelStyle}>Event name<input autoFocus value={draft.summary} onChange={(changeEvent) => update("summary", changeEvent.target.value)} style={inputStyle} placeholder="Add title" /></label>
         <label style={labelStyle}>Calendar<select value={draft.calendarId} disabled={changingCalendarUnsupported} onChange={(changeEvent) => update("calendarId", changeEvent.target.value)} style={{ ...inputStyle, opacity: changingCalendarUnsupported ? .65 : 1 }}>
           {calendars.map((calendar) => <option key={calendar.id} value={calendar.id}>{calendar.summary}{calendar.primary ? " (primary)" : ""}</option>)}
@@ -341,9 +364,15 @@ export default function CalendarEventEditorModal({
             <span className="material-symbols-rounded" style={{ flexShrink: 0, color: "var(--secondary)", fontSize: 20 }}>chevron_right</span>
           </button>
         </div>
+        {!draft.allDay && <p style={{ margin: 0, fontSize: 11, color: "var(--secondary)" }}>Times shown in {draft.timeZone.replaceAll("_", " ")}</p>}
+        {event?.recurringEventId ? <div style={{ padding: 12, border: "1px solid var(--border)", borderRadius: 11 }}>
+          <p style={{ margin: "0 0 8px", color: "var(--secondary)", fontSize: 12 }}>This event is part of a repeating series. Open the series to change its repeat schedule. Unsaved changes here will be discarded.</p>
+          <button type="button" onClick={onEditSeries} disabled={saving || !onEditSeries} style={{ ...inputStyle, cursor: "pointer", fontWeight: 700 }}>Edit series &amp; repeat settings</button>
+        </div> : <CalendarRepeatPicker value={repeat} startDate={draft.startDate} timeZone={draft.timeZone} allDay={draft.allDay} onChange={(rule) => { setRepeat(rule); setRepeatChanged(true); setValidationError(null); }} />}
+        {Boolean(event?.recurrence?.length) && <p style={{ margin: 0, color: "var(--secondary)", fontSize: 12 }}>Changes apply to the entire series, including past events. Choosing “Does not repeat” keeps only the first event.</p>}
         <label style={labelStyle}>Location<input value={draft.location} onChange={(changeEvent) => update("location", changeEvent.target.value)} style={inputStyle} placeholder="Optional" /></label>
         <label style={labelStyle}>Description<textarea value={draft.description} onChange={(changeEvent) => update("description", changeEvent.target.value)} style={{ ...inputStyle, resize: "none", minHeight: 70, lineHeight: 1.4 }} placeholder="Optional" /></label>
-      </div>
+      </fieldset>
 
       {(validationError || error) && <p role="alert" style={{ margin: "14px 0 0", padding: "10px 11px", border: "1px solid #ef6b6266", borderRadius: 10, background: "#ef6b6212", color: "#ef8b84", fontSize: 12, fontWeight: 700 }}>{validationError ?? error}</p>}
 
@@ -354,8 +383,18 @@ export default function CalendarEventEditorModal({
       </div>
     </section>
 
-    {schedulePickerOpen && <CalendarSchedulePicker value={{ allDay: draft.allDay, startDate: draft.startDate, startTime: draft.startTime, endDate: draft.endDate, endTime: draft.endTime }} onClose={() => setSchedulePickerOpen(false)} onSave={(schedule) => { setDraft((current) => ({ ...current, ...schedule })); setValidationError(null); setSchedulePickerOpen(false); }} />}
-    {deleteConfirmOpen && <div role="presentation" onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ position: "fixed", zIndex: 220, inset: 0, display: "grid", placeItems: "center", padding: 22, background: "rgba(0,0,0,.72)" }}><section role="alertdialog" aria-modal="true" aria-label="Delete event" style={{ width: "min(380px, 100%)", padding: 20, border: "1px solid #ef6b6266", borderRadius: 18, background: "var(--surface)" }}><h3 style={{ margin: "0 0 7px", color: "var(--primary)", fontSize: 19 }}>Delete this event?</h3><p style={{ margin: "0 0 18px", color: "var(--secondary)", fontSize: 13, lineHeight: 1.45 }}>This will delete it from Google Calendar.</p><div style={{ display: "flex", gap: 9 }}><button type="button" onClick={() => setDeleteConfirmOpen(false)} style={{ flex: 1, padding: 11, border: "1px solid var(--border)", borderRadius: 11, background: "transparent", color: "var(--primary)", fontWeight: 800 }}>Cancel</button><button type="button" onClick={() => { setDeleteConfirmOpen(false); onDelete?.(); }} style={{ flex: 1, padding: 11, border: 0, borderRadius: 11, background: "#ef6b62", color: "#171717", fontWeight: 850 }}>Delete</button></div></section></div>}
+    {schedulePickerOpen && <CalendarSchedulePicker value={{ allDay: draft.allDay, startDate: draft.startDate, startTime: draft.startTime, endDate: draft.endDate, endTime: draft.endTime }} onClose={() => setSchedulePickerOpen(false)} onSave={(schedule) => {
+      if (!event?.recurringEventId && (schedule.startDate !== draft.startDate || schedule.allDay !== draft.allDay)) {
+        if (!repeat) { setValidationError("Choose a new repeat option before changing the dates of this advanced series."); setSchedulePickerOpen(false); return; }
+        const next = selectRepeatPreset(repeat, repeat.preset, schedule.startDate);
+        const nextStart = parseLocalValue(schedule.startDate);
+        if (next.monthlyMode === "last" && addDays(nextStart, 7).getMonth() === nextStart.getMonth()) next.monthlyMode = "weekday";
+        setRepeat(next);
+        setRepeatChanged(true);
+      }
+      setDraft((current) => ({ ...current, ...schedule })); setValidationError(null); setSchedulePickerOpen(false);
+    }} />}
+    {deleteConfirmOpen && <div role="presentation" onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ position: "fixed", zIndex: 220, inset: 0, display: "grid", placeItems: "center", padding: 22, background: "rgba(0,0,0,.72)" }}><section role="alertdialog" aria-modal="true" aria-label="Delete event" style={{ width: "min(380px, 100%)", padding: 20, border: "1px solid #ef6b6266", borderRadius: 18, background: "var(--surface)" }}><h3 style={{ margin: "0 0 7px", color: "var(--primary)", fontSize: 19 }}>{event?.recurrence?.length ? "Delete this entire series?" : "Delete this event?"}</h3><p style={{ margin: "0 0 18px", color: "var(--secondary)", fontSize: 13, lineHeight: 1.45 }}>{event?.recurrence?.length ? "This will delete every occurrence, including past events, from Google Calendar." : event?.recurringEventId ? "Next, choose whether to delete this occurrence or the entire series." : "This will delete it from Google Calendar."}</p><div style={{ display: "flex", gap: 9 }}><button type="button" onClick={() => setDeleteConfirmOpen(false)} style={{ flex: 1, padding: 11, border: "1px solid var(--border)", borderRadius: 11, background: "transparent", color: "var(--primary)", fontWeight: 800 }}>Cancel</button><button type="button" onClick={() => { setDeleteConfirmOpen(false); onDelete?.(); }} style={{ flex: 1, padding: 11, border: 0, borderRadius: 11, background: "#ef6b62", color: "#171717", fontWeight: 850 }}>Delete</button></div></section></div>}
   </div>;
 
   return createPortal(modal, document.body);

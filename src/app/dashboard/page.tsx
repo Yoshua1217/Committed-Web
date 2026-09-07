@@ -7,14 +7,14 @@ import { Habit, HabitCompletion, Bucket, Goal, ScheduledCheckIn } from "@/lib/ty
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
-  todayString,
   toggleCheckbox,
   incrementCounter,
   addTimerSeconds,
 } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { isScheduledForDate } from "@/lib/streak-calculator";
+import { habitDay } from "@/lib/habit-history";
+import { useToday } from "@/lib/use-today";
 import { getProgressColor } from "@/lib/progress-color";
 import HabitCard from "@/components/habit-card";
 import MaterialIcon from "@/components/material-icon";
@@ -35,7 +35,7 @@ export default function DashboardHome() {
   const router = useRouter();
   const displayName = user?.displayName || user?.email?.split("@")[0] || "there";
 
-  const today = todayString();
+  const today = useToday();
   const now = new Date();
   const dateStr = `${dayNames[now.getDay()]}, ${monthNames[now.getMonth()]} ${now.getDate()}`;
 
@@ -67,27 +67,13 @@ export default function DashboardHome() {
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
 
-  const scheduledHabits = habits.filter((h) =>
-    isScheduledForDate(h, today) || completionMap.get(h.id)?.completed
-  );
+  const day = habitDay(habits, completions, today);
+  const scheduledHabits = day.habits;
   const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed);
   const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed);
   const todoCount = todoHabits.length;
   const completedCount = doneHabits.length;
-  // Calculate progress: counter/timer habits contribute fractionally
-  const progressSum = scheduledHabits.reduce((sum, h) => {
-    const comp = completionMap.get(h.id);
-    if (comp?.completed) return sum + 1;
-    if (!comp) return sum;
-    if (h.completionType === "counter" && h.counterGoal > 0) {
-      return sum + Math.min((comp.counterValue ?? 0) / h.counterGoal, 1);
-    }
-    if (h.completionType === "timer" && h.timerGoalSeconds > 0) {
-      return sum + Math.min((comp.timerSeconds ?? 0) / h.timerGoalSeconds, 1);
-    }
-    return sum;
-  }, 0);
-  const pct = scheduledHabits.length > 0 ? Math.round((progressSum / scheduledHabits.length) * 100) : 0;
+  const pct = day.percentage;
   const progressColor = getProgressColor(pct);
   const dueCheckIns = scheduledCheckIns.filter((checkIn) => checkIn.status === "pending" && checkIn.dueAt <= checkInClock);
 

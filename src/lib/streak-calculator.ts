@@ -1,4 +1,5 @@
 import { Habit, HabitCompletion, StreakInfo } from "@/lib/types";
+import { habitForDate, isPaused, scheduledOn } from "@/lib/habit-history";
 
 /**
  * Check if a habit is scheduled for a given day of the week.
@@ -19,23 +20,13 @@ export function isScheduledForDay(habit: Habit, dayOfWeek: number): boolean {
 }
 
 export function isHabitPausedOnDate(habit: Habit, date: string): boolean {
-  return (habit.pausePeriods ?? []).some(
-    (period) => date >= period.startedOn && (period.endedOn === null || date <= period.endedOn)
-  );
+  const version = habitForDate(habit, date);
+  return version ? isPaused(version, date) : false;
 }
 
 export function isScheduledForDate(habit: Habit, date: string): boolean {
-  const parsed = parseDate(date);
-  if (!parsed || isHabitPausedOnDate(habit, date)) return false;
-  return isScheduledForDay(habit, jsDayToIsoDayOfWeek(parsed.getDay()));
-}
-
-/**
- * Convert a JavaScript Date.getDay() value (0=Sunday, 1=Monday, ..., 6=Saturday)
- * to 1=Monday, 2=Tuesday, ..., 7=Sunday.
- */
-function jsDayToIsoDayOfWeek(jsDay: number): number {
-  return jsDay === 0 ? 7 : jsDay;
+  const version = habitForDate(habit, date);
+  return version ? scheduledOn(version, date) : false;
 }
 
 /**
@@ -74,8 +65,7 @@ function subtractDays(date: Date, days: number): Date {
 /**
  * Calculate streak / anti-streak for a habit.
  *
- * This is a direct port of the Android app's Kotlin streak calculation logic.
- * It must produce identical results.
+ * Resolve each day's historical schedule so later habit edits preserve streaks.
  *
  * @param habit The habit (includes schedule flags)
  * @param completions Pre-fetched completions for this habit

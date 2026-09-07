@@ -23,6 +23,7 @@ export default function ProjectsPanel() {
   const [showArchived, setShowArchived] = useState(false);
   const [editor, setEditor] = useState<Project | "new" | null>(null);
   const [taskEditor, setTaskEditor] = useState<Task | "new" | null>(null);
+  const [archiveConfirmation, setArchiveConfirmation] = useState<Project | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!user) return;
@@ -76,7 +77,7 @@ export default function ProjectsPanel() {
           </div>;
         })}
       </div>
-      <div className="planning-toolbar" style={{ marginTop: 20 }}><Link className="planning-text-button" href="/dashboard/calendar">Plan time in Calendar →</Link><button className="planning-text-button" disabled={busy} onClick={() => void act(async () => { await saveProject({ ...selected, archived: !selected.archived }); setSelectedId(null); })}>{selected.archived ? "Restore project" : "Archive project"}</button></div>
+      <div className="planning-toolbar" style={{ marginTop: 20 }}><Link className="planning-text-button" href="/dashboard/calendar">Plan time in Calendar →</Link><button className="planning-text-button" disabled={busy} onClick={() => selected.archived ? void act(async () => { await saveProject({ ...selected, archived: false }); setSelectedId(null); }) : setArchiveConfirmation(selected)}>{selected.archived ? "Restore project" : "Archive project"}</button></div>
     </> : <>
       <label className="planning-muted"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show archived projects</label>
       {loading ? <p className="planning-empty">Loading projects…</p> : <div className="project-grid">
@@ -97,7 +98,27 @@ export default function ProjectsPanel() {
     </>}
     {editor && user && <ProjectEditor key={typeof editor === "string" ? "new" : editor.id} project={editor === "new" ? null : editor} userId={user.uid} goals={goals} onClose={() => setEditor(null)} onSave={async (project) => { await saveProject(project); setSelectedId(project.id); setEditor(null); }} />}
     <TaskEditModal isOpen={taskEditor !== null} task={taskEditor === "new" ? null : taskEditor} defaultProjectId={selectedId ?? ""} onClose={() => setTaskEditor(null)} onSave={saveTask} goals={goals} buckets={buckets} userId={user?.uid ?? ""} nextSortOrder={tasks.length} />
+    {archiveConfirmation && <ArchiveProjectConfirmation project={archiveConfirmation} busy={busy} error={error} onCancel={() => setArchiveConfirmation(null)} onConfirm={() => void act(async () => { await saveProject({ ...archiveConfirmation, archived: true }); setSelectedId(null); setArchiveConfirmation(null); })} />}
   </section>;
+}
+
+function ArchiveProjectConfirmation({ project, busy, error, onCancel, onConfirm }: { project: Project; busy: boolean; error: string | null; onCancel: () => void; onConfirm: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onCancel(); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [busy, onCancel]);
+  return <div className="planning-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
+    <section role="dialog" aria-modal="true" aria-labelledby="archive-project-title" className="planning-dialog" style={{ maxWidth: 440 }}>
+      <h2 id="archive-project-title">Archive {project.name}?</h2>
+      <p className="planning-muted">The project will move to your archived projects. Its tasks, progress, goal, and deadline will stay intact.</p>
+      {error && <p role="alert" className="planning-error">{error}</p>}
+      <div className="planning-dialog-actions" style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
+        <button type="button" className="planning-text-button" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button type="button" className="planning-primary" disabled={busy} onClick={onConfirm}>{busy ? "Archiving…" : "Archive project"}</button>
+      </div>
+    </section>
+  </div>;
 }
 
 function ProgressBar({ percent }: { percent: number }) {

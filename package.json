@@ -10,7 +10,8 @@
     "android:open": "npx cap open android",
     "android:debug": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:habit-rules": "firebase emulators:exec --only firestore --project demo-habit-history --config firebase.habit-tests.json \"node --test tests/habit-history.rules.mjs\""
   },
   "dependencies": {
     "@capacitor-firebase/authentication": "^8.4.0",
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.5.0",
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

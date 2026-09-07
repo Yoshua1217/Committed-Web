@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Habit, HabitCompletion } from "@/lib/types";
-import { getCompletionsForUser } from "@/lib/habits-service";
-import { isScheduledForDate } from "@/lib/streak-calculator";
+import { subscribeToCompletionHistory, subscribeToHabits } from "@/lib/habits-service";
+import { habitDay } from "@/lib/habit-history";
+import { useToday } from "@/lib/use-today";
 
 type Range = "week" | "month" | "year";
 
@@ -43,16 +44,18 @@ function formatDate(date: string, range: Range) {
 
 export default function HabitCompletionChart({
   userId,
-  habits,
   todayCompletions,
   animateTodayChange = false,
 }: {
   userId: string;
-  habits: Habit[];
   todayCompletions: HabitCompletion[];
   /** Enables the progress-line motion for check/uncheck actions on the Habits page. */
   animateTodayChange?: boolean;
 }) {
+  const todayKey = useToday();
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [habitsLoaded, setHabitsLoaded] = useState(false);
+  useEffect(() => subscribeToHabits(userId, (items) => { setHabits(items); setHabitsLoaded(true); }, { includeDeleted: true }), [userId]);
   const [range, setRange] = useState<Range>("week");
   const [history, setHistory] = useState<HabitCompletion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,17 +66,14 @@ export default function HabitCompletionChart({
 
   useEffect(() => {
     if (!userId) return;
-    let active = true;
-    getCompletionsForUser(userId)
-      .then((data) => { if (active) setHistory(data); })
-      .catch((error) => console.error("Could not load habit history:", error))
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+    return subscribeToCompletionHistory(userId, (items) => {
+      setHistory(items);
+      setLoading(false);
+    });
   }, [userId]);
 
   const points = useMemo<ChartPoint[]>(() => {
-    const completionMap = new Map(history.map((completion) => [`${completion.habitId}:${completion.date}`, completion]));
-    todayCompletions.forEach((completion) => completionMap.set(`${completion.habitId}:${completion.date}`, completion));
+    const completions = [...history.filter((item) => item.date !== todayKey), ...todayCompletions];
     const days = rangeDays[range];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -82,21 +82,10 @@ export default function HabitCompletionChart({
       const day = new Date(today);
       day.setDate(today.getDate() - (days - 1 - index));
       const date = toDateString(day);
-      const scheduled = habits.filter((habit) => {
-        const createdOn = habit.createdAt ? toDateString(new Date(habit.createdAt)) : null;
-        const completion = completionMap.get(`${habit.id}:${date}`);
-        return (createdOn === null || date >= createdOn) && (isScheduledForDate(habit, date) || completion?.completed);
-      });
-      const progress = scheduled.reduce((total, habit) => {
-        const completion = completionMap.get(`${habit.id}:${date}`);
-        if (habit.completionType === "counter" && habit.counterGoal > 0) return total + Math.min((completion?.counterValue ?? 0) / habit.counterGoal, 1);
-        if (habit.completionType === "timer" && habit.timerGoalSeconds > 0) return total + Math.min((completion?.timerSeconds ?? 0) / habit.timerGoalSeconds, 1);
-        return total + (completion?.completed ? 1 : 0);
-      }, 0);
-      const value = scheduled.length ? Math.round((progress / scheduled.length) * 100) : 0;
-      return { date, label: formatDate(date, range), value, scheduled: scheduled.length };
+      const summary = habitDay(habits, completions, date);
+      return { date, label: formatDate(date, range), value: summary.percentage, scheduled: summary.scheduled };
     });
-  }, [habits, history, range, todayCompletions]);
+  }, [habits, history, range, todayCompletions, todayKey]);
 
   // Only the live value for today is animated. History loads and range changes
   // update immediately so the graph never replays when the page is opened.
@@ -170,7 +159,7 @@ export default function HabitCompletionChart({
         </div>
       </div>
 
-      {loading ? <div style={{ height: 250, display: "grid", placeItems: "center", color: "var(--secondary)", fontSize: 13 }}>Loading your progress…</div> : (
+      {loading || !habitsLoaded ? <div style={{ height: 250, display: "grid", placeItems: "center", color: "var(--secondary)", fontSize: 13 }}>Loading your progress…</div> : (
         <div style={{ position: "relative" }}>
           <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label="Daily habit completion percentage" onPointerMove={onPointerMove} onPointerLeave={() => setHoveredIndex(null)} style={{ display: "block", width: "100%", height: "auto", minHeight: 210, cursor: "crosshair", overflow: "visible" }}>
             <defs>

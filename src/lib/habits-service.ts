@@ -1,14 +1,14 @@
 import { db } from "@/lib/firebase";
 import { Habit, HabitCompletion } from "@/lib/types";
+import { assertHabitDayWritable, habitDay, localDateString, preserveHabitHistory } from "@/lib/habit-history";
 import {
   collection,
   query,
   where,
-  orderBy,
   onSnapshot,
   doc,
   setDoc,
-  deleteDoc,
+  runTransaction,
   getDocs,
   getDoc,
 } from "firebase/firestore";
@@ -30,11 +30,7 @@ export function generateId(): string {
 }
 
 export function todayString(): string {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return localDateString();
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +60,10 @@ function habitFromFirestore(data: Record<string, unknown>): Habit {
     sortOrder: Number(data.sortOrder ?? 0),
     createdAt: Number(data.createdAt ?? 0),
     userId: (data.userId as string) ?? "",
+    ...(typeof data.createdOn === "string" ? { createdOn: data.createdOn } : {}),
+    ...(typeof data.effectiveFrom === "string" ? { effectiveFrom: data.effectiveFrom } : {}),
+    deletedOn: (data.deletedOn as string) ?? null,
+    history: (data.history as Habit["history"]) ?? {},
     pausePeriods: Array.isArray(data.pausePeriods)
       ? (data.pausePeriods as Habit["pausePeriods"])
       : [],
@@ -76,7 +76,8 @@ function habitFromFirestore(data: Record<string, unknown>): Habit {
 
 export function subscribeToHabits(
   userId: string,
-  callback: (habits: Habit[]) => void
+  callback: (habits: Habit[]) => void,
+  options: { includeDeleted?: boolean } = {}
 ): () => void {
   const q = query(
     collection(db, "habits"),
@@ -85,7 +86,8 @@ export function subscribeToHabits(
 
   return onSnapshot(q, (snapshot) => {
     const habits: Habit[] = snapshot.docs
-      .map((d) => habitFromFirestore(d.data() as Record<string, unknown>))
+      .map((d) => habitFromFirestore({ ...d.data(), id: d.id }))
+      .filter((habit) => options.includeDeleted || !habit.deletedOn)
       .sort((a, b) => a.sortOrder - b.sortOrder);
     callback(habits);
   }, (error) => {
@@ -120,9 +122,8 @@ export function subscribeToCompletionsForDate(
 // CRUD
 // ---------------------------------------------------------------------------
 
-export async function saveHabit(habit: Habit): Promise<void> {
-  // Store all fields including id — matches Android's toFirestoreMap()
-  await setDoc(doc(db, "habits", habit.id), {
+function habitToFirestore(habit: Habit) {
+  return {
     id: habit.id,
     bucketId: habit.bucketId,
     goalId: habit.goalId,
@@ -144,16 +145,43 @@ export async function saveHabit(habit: Habit): Promise<void> {
     createdAt: habit.createdAt,
     userId: habit.userId,
     pausePeriods: habit.pausePeriods ?? [],
+    ...(habit.createdOn ? { createdOn: habit.createdOn } : {}),
+    effectiveFrom: habit.effectiveFrom,
+    deletedOn: habit.deletedOn ?? null,
+    history: habit.history ?? {},
+    utcOffsetMinutes: -new Date().getTimezoneOffset(),
+  };
+}
+
+export async function saveHabit(habit: Habit): Promise<void> {
+  const ref = doc(db, "habits", habit.id);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const previous = snapshot.exists() ? habitFromFirestore({ ...snapshot.data(), id: snapshot.id }) : null;
+    if (previous && previous.userId !== habit.userId) throw new Error("Habit owner cannot change.");
+    const saved = preserveHabitHistory(previous, { ...habit, deletedOn: null });
+    transaction.set(ref, habitToFirestore(saved));
   });
 }
 
 export async function deleteHabit(habitId: string): Promise<void> {
-  await deleteDoc(doc(db, "habits", habitId));
+  const ref = doc(db, "habits", habitId);
+  await runTransaction(db, async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (!snapshot.exists()) return;
+    const previous = habitFromFirestore({ ...snapshot.data(), id: snapshot.id });
+    if (previous.deletedOn) return;
+    const saved = preserveHabitHistory(previous, { ...previous, deletedOn: todayString() });
+    transaction.set(ref, habitToFirestore(saved));
+  });
 }
 
 export async function saveCompletion(
   completion: HabitCompletion
 ): Promise<void> {
+  assertHabitDayWritable(completion.date);
+  const now = new Date();
+  const dayEndsAt = completion.dayEndsAt ?? new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
   await setDoc(doc(db, "habit_completions", completion.id), {
     id: completion.id,
     habitId: completion.habitId,
@@ -163,7 +191,60 @@ export async function saveCompletion(
     timerSeconds: completion.timerSeconds,
     completedAt: completion.completedAt,
     userId: completion.userId,
+    utcOffsetMinutes: -now.getTimezoneOffset(),
+    dayEndsAt,
+    includedInDay: completion.includedInDay ?? false,
+    manualHistoryEdit: false,
   });
+}
+
+/** Explicit day-editor corrections change completions, never habit definitions. */
+export async function editHabitCompletion(
+  userId: string,
+  habitId: string,
+  date: string,
+  completed: boolean,
+  existingId?: string
+): Promise<void> {
+  const parsed = new Date(`${date}T12:00:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsed.getTime()) || localDateString(parsed) !== date || date > todayString()) {
+    throw new Error("Choose today or a past date.");
+  }
+  const habitRef = doc(db, "habits", habitId);
+  const completionRef = doc(db, "habit_completions", existingId ?? `habit-day-${habitId}-${date}`);
+  await runTransaction(db, async (transaction) => {
+    const habitSnapshot = await transaction.get(habitRef);
+    const completionSnapshot = await transaction.get(completionRef);
+    if (!habitSnapshot.exists()) throw new Error("Habit history is unavailable.");
+    const habit = habitFromFirestore({ ...habitSnapshot.data(), id: habitId });
+    const existing = completionSnapshot.exists() ? completionSnapshot.data() as HabitCompletion : null;
+    if (habit.userId !== userId || (existing && (existing.userId !== userId || existing.habitId !== habitId || existing.date !== date))) {
+      throw new Error("Completion does not belong to this habit and day.");
+    }
+    // Uses the original schedule/targets even if the habit is now paused or deleted.
+    if (!habitDay([habit], existing ? [existing] : [], date).scheduled) {
+      throw new Error("This habit was not part of that day.");
+    }
+    const nextMidnight = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate() + 1);
+    transaction.set(completionRef, {
+      id: existingId ?? `habit-day-${habitId}-${date}`,
+      habitId, userId, date, completed,
+      // Clearing completion must also clear a full counter/timer's percentage.
+      counterValue: completed ? existing?.counterValue ?? 0 : 0,
+      timerSeconds: completed ? existing?.timerSeconds ?? 0 : 0,
+      completedAt: completed ? existing?.completedAt ?? Date.now() : null,
+      utcOffsetMinutes: -new Date().getTimezoneOffset(),
+      dayEndsAt: existing?.dayEndsAt ?? nextMidnight.getTime(),
+      includedInDay: true,
+      manualHistoryEdit: true,
+    });
+  });
+}
+
+export function subscribeToCompletionHistory(userId: string, callback: (items: HabitCompletion[]) => void): () => void {
+  return onSnapshot(query(collection(db, "habit_completions"), where("userId", "==", userId)),
+    (snapshot) => callback(snapshot.docs.map((item) => item.data() as HabitCompletion)),
+    (error) => console.error("Could not load habit history:", error));
 }
 
 // ---------------------------------------------------------------------------
@@ -270,11 +351,13 @@ export async function markHabitComplete(
   habitId: string,
   date: string
 ): Promise<HabitCompletion | null> {
+  // Delayed check-ins and workout mappings must never rewrite a closed day.
+  if (date !== todayString()) return null;
   const habitSnapshot = await getDoc(doc(db, "habits", habitId));
   if (!habitSnapshot.exists()) return null;
 
   const habit = habitFromFirestore(habitSnapshot.data() as Record<string, unknown>);
-  if (habit.userId !== userId) return null;
+  if (habit.userId !== userId || habit.deletedOn) return null;
 
   const existing = (await getCompletionsForDate(userId, date))
     .find((completion) => completion.habitId === habitId) ?? null;

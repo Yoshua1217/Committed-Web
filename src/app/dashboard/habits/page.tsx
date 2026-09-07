@@ -7,7 +7,6 @@ import { Habit, HabitCompletion, Bucket, Goal, ScheduledCheckIn } from "@/lib/ty
 import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
-  todayString,
   toggleCheckbox,
   incrementCounter,
   addTimerSeconds,
@@ -16,7 +15,8 @@ import {
 } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { isScheduledForDate } from "@/lib/streak-calculator";
+import { habitDay } from "@/lib/habit-history";
+import { useToday } from "@/lib/use-today";
 import HabitCard from "@/components/habit-card";
 import ProgressCard from "@/components/progress-card";
 import HabitEditModal from "@/components/habit-edit-modal";
@@ -48,7 +48,7 @@ interface CompletionFlight {
 export default function HabitsPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const today = todayString();
+  const today = useToday();
 
   const [habits, setHabits] = useState<Habit[]>([]);
   const [completions, setCompletions] = useState<HabitCompletion[]>([]);
@@ -105,9 +105,8 @@ export default function HabitsPage() {
 
   // Filter to today's scheduled habits
   const completionMap = new Map(completions.map((c) => [c.habitId, c]));
-  const scheduledHabits = habits.filter((h) =>
-    isScheduledForDate(h, today) || completionMap.get(h.id)?.completed
-  );
+  const day = habitDay(habits, completions, today);
+  const scheduledHabits = day.habits;
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
   const pendingCheckInForHabit = (habitId: string) => scheduledCheckIns.find((checkIn) => checkIn.status === "pending" && checkIn.sourceType === "habit" && checkIn.sourceId === habitId) ?? null;
@@ -116,16 +115,7 @@ export default function HabitsPage() {
   // React moves it into the completed group.
   const todoHabits = scheduledHabits.filter((h) => !completionMap.get(h.id)?.completed || h.id === completingHabitId);
   const doneHabits = scheduledHabits.filter((h) => completionMap.get(h.id)?.completed && h.id !== completingHabitId);
-  const todayProgress = scheduledHabits.reduce((total, habit) => {
-    const completion = completionMap.get(habit.id);
-    if (habit.completionType === "counter" && habit.counterGoal > 0) {
-      return total + Math.min((completion?.counterValue ?? 0) / habit.counterGoal, 1);
-    }
-    if (habit.completionType === "timer" && habit.timerGoalSeconds > 0) {
-      return total + Math.min((completion?.timerSeconds ?? 0) / habit.timerGoalSeconds, 1);
-    }
-    return total + (completion?.completed ? 1 : 0);
-  }, 0);
+  const todayProgress = day.progress;
 
   const handleToggleCheckbox = async (habit: Habit) => {
     const existing = completionMap.get(habit.id) ?? null;
@@ -195,6 +185,7 @@ export default function HabitsPage() {
       await saveHabit(habit);
     } catch (err) {
       console.error("Failed to save habit:", err);
+      throw err;
     }
   };
 
@@ -203,6 +194,7 @@ export default function HabitsPage() {
       await deleteHabit(habitId);
     } catch (err) {
       console.error("Failed to delete habit:", err);
+      throw err;
     }
   };
 
@@ -294,7 +286,7 @@ export default function HabitsPage() {
             <ProgressCard totalScheduled={scheduledHabits.length} progressValue={todayProgress} completedNames={doneHabits.map((h) => h.name)} />
           </div>
           {habits.length > 0 ? (
-            <HabitCompletionChart userId={user?.uid ?? ""} habits={habits} todayCompletions={completions} animateTodayChange />
+            <HabitCompletionChart userId={user?.uid ?? ""} todayCompletions={completions} animateTodayChange />
           ) : (
             <div className="text-center" style={{ backgroundColor: "var(--surface)", border: "1px solid var(--border)", borderRadius: 20, padding: 48 }}>
               <p style={{ fontSize: 14, fontWeight: 500, color: "var(--primary)", margin: "0 0 4px" }}>No habits yet</p>

@@ -7,6 +7,9 @@ import {
   query,
   where,
   writeBatch,
+  setDoc,
+  updateDoc,
+  deleteField,
 } from "firebase/firestore";
 
 const USER_DATA_COLLECTIONS = [
@@ -28,23 +31,31 @@ const LOCAL_STORAGE_KEYS = [
 
 /** Permanently removes all application data belonging to a signed-in user. */
 export async function resetAccountData(userId: string): Promise<void> {
-  for (const collectionName of USER_DATA_COLLECTIONS) {
-    const snapshot = await getDocs(
-      query(collection(db, collectionName), where("userId", "==", userId))
-    );
+  // Explicit account reset is the only path allowed to erase habit history.
+  const settingsRef = doc(db, "userSettings", userId);
+  await setDoc(settingsRef, { resettingHabits: true }, { merge: true });
+  try {
+    for (const collectionName of USER_DATA_COLLECTIONS) {
+      const snapshot = await getDocs(
+        query(collection(db, collectionName), where("userId", "==", userId))
+      );
 
-    // Firestore limits a batch to 500 writes. Chunking keeps reset reliable for
-    // accounts with a long habit history.
-    for (let start = 0; start < snapshot.docs.length; start += 500) {
-      const batch = writeBatch(db);
-      snapshot.docs.slice(start, start + 500).forEach((document) => {
-        batch.delete(document.ref);
-      });
-      await batch.commit();
+      // Firestore limits a batch to 500 writes. Chunking keeps reset reliable for
+      // accounts with a long habit history.
+      for (let start = 0; start < snapshot.docs.length; start += 500) {
+        const batch = writeBatch(db);
+        snapshot.docs.slice(start, start + 500).forEach((document) => {
+          batch.delete(document.ref);
+        });
+        await batch.commit();
+      }
     }
-  }
 
-  await deleteDoc(doc(db, "userSettings", userId));
+    await deleteDoc(settingsRef);
+  } catch (error) {
+    await updateDoc(settingsRef, { resettingHabits: deleteField() });
+    throw error;
+  }
 
   if (typeof window !== "undefined") {
     LOCAL_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));

@@ -823,6 +823,7 @@ input:focus, textarea:focus {
 .completed-set-heading > span { text-align: center; }
 .completed-set-row { min-height: 38px; padding: 7px 8px; border-radius: 10px; background: var(--background); color: var(--primary); font-size: 13px; font-weight: 750; }
 .completed-set-row > span { text-align: center; }
+.completed-set-row + .completed-set-row { margin-top: 8px; }
 
 .workout-preview-content { max-width: 720px; margin: 0 auto; padding: 16px 24px 0; }
 .workout-preview-section-title { margin: 0 0 11px; color: var(--primary); font-size: 14px; font-weight: 850; }

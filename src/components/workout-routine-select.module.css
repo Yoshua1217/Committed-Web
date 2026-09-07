@@ -1,0 +1,21 @@
+.root { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 18px; }
+.label { color: var(--secondary); font-size: 12px; }
+.control { position: relative; min-width: 0; flex: 1 1 220px; }
+.trigger { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 13px 15px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--primary); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.trigger > span:first-child { color: var(--secondary); flex-shrink: 0; }
+.trigger:hover, .trigger[aria-expanded="true"] { border-color: #ffffff40; background: #171717; }
+.trigger:focus-visible { outline: 2px solid #ffffff80; outline-offset: 3px; }
+.name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chevron { display: flex; color: var(--secondary); transition: transform 150ms ease; }
+.expanded { transform: rotate(180deg); }
+.menu { position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 20; margin: 0; padding: 6px; list-style: none; max-height: min(320px, 45dvh); overflow-y: auto; overscroll-behavior: contain; border: 1px solid #ffffff26; border-radius: 16px; background: #141414; box-shadow: 0 16px 40px #0009; }
+.option { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid transparent; border-radius: 10px; color: var(--primary); cursor: pointer; }
+.option + .option { margin-top: 3px; }
+.option[aria-selected="true"] { background: #ffffff0d; }
+.option:hover { background: #ffffff12; }
+.option:focus { outline: none; border-color: #ffffff40; background: #ffffff12; }
+.optionText { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.optionName { font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.meta { font-size: 11px; color: var(--secondary); }
+@media (max-width: 480px) { .control { flex-basis: 100%; } }
+@media (prefers-reduced-motion: reduce) { .chevron { transition: none; } }

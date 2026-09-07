@@ -1,21 +1,23 @@
 "use client";
 
-import { Fragment, useState, useEffect, useCallback, useRef } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { Habit, HabitCompletion, Bucket, Goal } from "@/lib/types";
 import {
   subscribeToHabits,
+  subscribeToCompletionsForDate,
   saveHabit,
   deleteHabit,
   getCompletionsForDate,
-  saveCompletion,
-  generateId,
+  editHabitCompletion,
 } from "@/lib/habits-service";
 import { subscribeToBuckets, saveBucket } from "@/lib/buckets-service";
 import { subscribeToGoals } from "@/lib/goals-service";
-import { isHabitPausedOnDate, isScheduledForDate } from "@/lib/streak-calculator";
+import { isHabitPausedOnDate } from "@/lib/streak-calculator";
+import { habitDay } from "@/lib/habit-history";
+import { useToday } from "@/lib/use-today";
 import HabitEditModal from "@/components/habit-edit-modal";
 import MaterialIcon from "@/components/material-icon";
 import logoPic from "../../../../../public/logo.png";
@@ -172,9 +174,9 @@ function dateToString(d: Date): string {
 }
 
 /** Generate past N days (excluding today) */
-function getPastDays(count: number): string[] {
+function getPastDays(count: number, today: string): string[] {
   const days: string[] = [];
-  const now = new Date();
+  const now = new Date(`${today}T12:00:00`);
   for (let i = 1; i <= count; i++) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
@@ -188,6 +190,7 @@ interface DayData {
   completions: HabitCompletion[];
   scheduled: number;
   completed: number;
+  percentage: number;
   loading: boolean;
 }
 
@@ -195,7 +198,9 @@ export default function ManageHabitsPage() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [habits, setHabits] = useState<Habit[]>([]);
+  const today = useToday();
+  const [allHabits, setAllHabits] = useState<Habit[]>([]);
+  const habits = useMemo(() => allHabits.filter((habit) => !habit.deletedOn), [allHabits]);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -221,16 +226,17 @@ export default function ManageHabitsPage() {
     : activeTab;
 
   // History state
-  const [historyDays] = useState(() => getPastDays(14));
+  const historyDays = useMemo(() => getPastDays(14, today), [today]);
   const [dayDataMap, setDayDataMap] = useState<Record<string, DayData>>({});
   const [editingDay, setEditingDay] = useState<string | null>(null);
   const [editCompletions, setEditCompletions] = useState<Record<string, boolean>>({});
   const [savingDay, setSavingDay] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (!user) return;
     const unsubs: (() => void)[] = [];
-    unsubs.push(subscribeToHabits(user.uid, (h) => { setHabits(h); setLoading(false); }));
+    unsubs.push(subscribeToHabits(user.uid, (h) => { setAllHabits(h); setLoading(false); }, { includeDeleted: true }));
     unsubs.push(subscribeToBuckets(user.uid, (b) => setBuckets(b)));
     unsubs.push(subscribeToGoals(user.uid, (g) => setGoals(g)));
     return () => unsubs.forEach((u) => u());
@@ -255,37 +261,20 @@ export default function ManageHabitsPage() {
     };
   }, [draggedBucketId]);
 
-  // Load history data when habits are available
+  // Include retained deleted habits, and resolve every date's original definition.
   useEffect(() => {
-    if (!user || habits.length === 0) return;
-    const datesToLoad = [dateToString(new Date()), ...historyDays];
-    datesToLoad.forEach((dateStr) => {
-      // Only load if not already loaded
-      setDayDataMap((prev) => {
-        if (prev[dateStr] && !prev[dateStr].loading) return prev;
-        return { ...prev, [dateStr]: { date: dateStr, completions: [], scheduled: 0, completed: 0, loading: true } };
-      });
-
-      getCompletionsForDate(user.uid, dateStr).then((completions) => {
-        const completionMap = new Map(completions.map((c) => [c.habitId, c]));
-        const scheduled = habits.filter((h) =>
-          isScheduledForDate(h, dateStr) || completionMap.get(h.id)?.completed
-        );
-        const completedCount = scheduled.filter((h) => completionMap.get(h.id)?.completed).length;
-
-        setDayDataMap((prev) => ({
-          ...prev,
-          [dateStr]: {
-            date: dateStr,
-            completions,
-            scheduled: scheduled.length,
-            completed: completedCount,
-            loading: false,
-          },
-        }));
+    if (!user || loading) return;
+    let active = true;
+    const unsubs = [today, ...historyDays].map((date) => {
+      setDayDataMap((previous) => ({ ...previous, [date]: { date, completions: [], scheduled: 0, completed: 0, percentage: 0, loading: true } }));
+      return subscribeToCompletionsForDate(user.uid, date, (completions) => {
+        if (!active) return;
+        const summary = habitDay(allHabits, completions, date);
+        setDayDataMap((previous) => ({ ...previous, [date]: { date, completions, scheduled: summary.scheduled, completed: summary.completed, percentage: summary.percentage, loading: false } }));
       });
     });
-  }, [habits, historyDays, user]);
+    return () => { active = false; unsubs.forEach((unsubscribe) => unsubscribe()); };
+  }, [allHabits, historyDays, user, today, loading]);
 
   const bucketMap = new Map(buckets.map((b) => [b.id, b]));
   const goalMap = new Map(goals.map((g) => [g.id, g]));
@@ -321,10 +310,8 @@ export default function ManageHabitsPage() {
     const data = dayDataMap[date];
     return data && !data.loading;
   });
-  const hasTrackingHistory = historyDays.some((date) =>
-    dayDataMap[date]?.completions.some((completion) => completion.completed)
-  );
-  const historyDates = [dateToString(new Date()), ...historyDays];
+  const hasTrackingHistory = [today, ...historyDays].some((date) => (dayDataMap[date]?.scheduled ?? 0) > 0);
+  const historyDates = [today, ...historyDays];
   const openCreateHabitModal = () => {
     setEditingHabit(null);
     setModalOpen(true);
@@ -404,12 +391,12 @@ export default function ManageHabitsPage() {
   })();
 
   const handleSave = async (habit: Habit) => {
-    try { await saveHabit(habit); } catch (err) { console.error(err); }
+    await saveHabit(habit);
   };
 
   const handleDelete = async (habitId: string) => {
     setDeleteConfirm(null);
-    try { await deleteHabit(habitId); } catch (err) { console.error(err); }
+    try { await deleteHabit(habitId); } catch (err) { console.error(err); setSaveError("Could not delete the habit. Please try again."); throw err; }
   };
 
   const handleTogglePause = async (habit: Habit) => {
@@ -429,17 +416,17 @@ export default function ManageHabitsPage() {
       periods.push({ startedOn: today, endedOn: null });
     }
 
-    await saveHabit({ ...habit, pausePeriods: periods });
+    try {
+      await saveHabit({ ...habit, pausePeriods: periods });
+    } catch { setSaveError("Could not change the pause status. Please try again."); }
   };
 
   const openDayEditor = (dateStr: string) => {
     const dayData = dayDataMap[dateStr];
-    if (!dayData || dayData.loading) return;
+    if (dateStr > today || !dayData || dayData.loading) return;
 
     const completionMap = new Map(dayData.completions.map((c) => [c.habitId, c]));
-    const scheduled = habits.filter((h) =>
-      isScheduledForDate(h, dateStr) || completionMap.get(h.id)?.completed
-    );
+    const scheduled = habitDay(allHabits, dayData.completions, dateStr).habits;
 
     const initial: Record<string, boolean> = {};
     scheduled.forEach((h) => {
@@ -451,70 +438,51 @@ export default function ManageHabitsPage() {
   };
 
   const handleSaveDay = useCallback(async () => {
-    if (!editingDay) return;
+    if (!editingDay || editingDay > today) { setEditingDay(null); return; }
     setSavingDay(true);
+    setSaveError("");
+    try {
+      const dayData = dayDataMap[editingDay];
+      const completionMap = new Map(dayData.completions.map((c) => [c.habitId, c]));
 
-    const dayData = dayDataMap[editingDay];
-    const completionMap = new Map(dayData.completions.map((c) => [c.habitId, c]));
+      const promises: Promise<void>[] = [];
+      for (const [habitId, completed] of Object.entries(editCompletions)) {
+        const existing = completionMap.get(habitId);
+        if (!user || completed === (existing?.completed ?? false)) continue;
+        promises.push(editHabitCompletion(user.uid, habitId, editingDay, completed, existing?.id));
+      }
 
-    const promises: Promise<void>[] = [];
-    for (const [habitId, completed] of Object.entries(editCompletions)) {
-      const existing = completionMap.get(habitId);
-      const habit = habits.find((h) => h.id === habitId);
-      if (!habit) continue;
+      await Promise.all(promises);
 
-      const completion: HabitCompletion = existing
-        ? { ...existing, completed, completedAt: completed ? (existing.completedAt ?? Date.now()) : null }
-        : {
-            id: generateId(),
-            habitId,
-            date: editingDay,
-            completed,
-            counterValue: 0,
-            timerSeconds: 0,
-            completedAt: completed ? Date.now() : null,
-            userId: habit.userId,
-          };
-      promises.push(saveCompletion(completion));
-    }
+      // Refresh this day's data
+      if (!user) return;
+      const freshCompletions = await getCompletionsForDate(user.uid, editingDay);
+      const freshMap = new Map(freshCompletions.map((c) => [c.habitId, c]));
+      const summary = habitDay(allHabits, freshCompletions, editingDay);
+      const scheduled = summary.habits;
+      const completedCount = scheduled.filter((h) => freshMap.get(h.id)?.completed).length;
 
-    await Promise.all(promises);
+      setDayDataMap((prev) => ({
+        ...prev,
+        [editingDay]: {
+          date: editingDay,
+          completions: freshCompletions,
+          scheduled: scheduled.length,
+          completed: completedCount,
+          percentage: summary.percentage,
+          loading: false,
+        },
+      }));
 
-    // Refresh this day's data
-    if (!user) {
-      setSavingDay(false);
-      return;
-    }
-    const freshCompletions = await getCompletionsForDate(user.uid, editingDay);
-    const freshMap = new Map(freshCompletions.map((c) => [c.habitId, c]));
-    const scheduled = habits.filter((h) =>
-      isScheduledForDate(h, editingDay) || freshMap.get(h.id)?.completed
-    );
-    const completedCount = scheduled.filter((h) => freshMap.get(h.id)?.completed).length;
-
-    setDayDataMap((prev) => ({
-      ...prev,
-      [editingDay]: {
-        date: editingDay,
-        completions: freshCompletions,
-        scheduled: scheduled.length,
-        completed: completedCount,
-        loading: false,
-      },
-    }));
-
-    setSavingDay(false);
-    setEditingDay(null);
-  }, [editingDay, editCompletions, dayDataMap, habits, user]);
+      setEditingDay(null);
+    } catch {
+      setSaveError("Could not save this day. Check your connection and try again.");
+    } finally { setSavingDay(false); }
+  }, [editingDay, editCompletions, dayDataMap, allHabits, user, today]);
 
   // Get scheduled habits for the editing day
   const editingDayScheduled = editingDay
-    ? (() => {
-        const completionMap = new Map(dayDataMap[editingDay]?.completions.map((c) => [c.habitId, c]) ?? []);
-        return habits.filter((h) =>
-          isScheduledForDate(h, editingDay) || completionMap.get(h.id)?.completed
-        );
-      })()
+    ? habitDay(allHabits, dayDataMap[editingDay]?.completions ?? [], editingDay).habits
     : [];
 
   if (loading) {
@@ -528,6 +496,7 @@ export default function ManageHabitsPage() {
 
   return (
     <div style={{ padding: 32, width: "100%" }}>
+      {saveError && <p role="alert" style={{ color: "var(--error)", fontSize: 13 }}>{saveError}</p>}
       {/* Header */}
       <div className="mobile-page-header flex items-center justify-between" style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "var(--primary)", margin: 0 }}>Habits</h1>
@@ -961,7 +930,7 @@ export default function ManageHabitsPage() {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (isDeleting) {
-                          handleDelete(habit.id);
+                          void handleDelete(habit.id).catch(() => {});
                         } else {
                           setDeleteConfirm(habit.id);
                           setTimeout(() => setDeleteConfirm(null), 3000);
@@ -1001,7 +970,7 @@ export default function ManageHabitsPage() {
       {/* ═══════════════════════════════════════════════════════ */}
       {/* History Section */}
       {/* ═══════════════════════════════════════════════════════ */}
-      {currentTab === "history" && habits.length === 0 && (
+      {currentTab === "history" && allHabits.length === 0 && (
         <HabitEmptyState
           title="Create your first habit"
           description="Your completed habits will build a history here."
@@ -1010,16 +979,17 @@ export default function ManageHabitsPage() {
         />
       )}
 
-      {currentTab === "history" && habits.length > 0 && historyLoaded && !hasTrackingHistory && (
+      {currentTab === "history" && allHabits.length > 0 && historyLoaded && !hasTrackingHistory && (
         <HabitEmptyState
           title="Start tracking"
           description="Complete a habit to begin building your history."
         />
       )}
 
-      {currentTab === "history" && habits.length > 0 && (!historyLoaded || hasTrackingHistory) && (
+      {currentTab === "history" && allHabits.length > 0 && (!historyLoaded || hasTrackingHistory) && (
         <div style={{ marginTop: 8 }}>
           <h2 style={sectionHeaderStyle}>History</h2>
+          <p style={{ color: "var(--secondary)", fontSize: 13 }}>Edit past completions here. Each day keeps its original habits; habit changes apply to today and future days.</p>
           <div
             className="flex flex-col"
             style={{
@@ -1032,13 +1002,11 @@ export default function ManageHabitsPage() {
             {historyDates.map((dateStr) => {
               const data = dayDataMap[dateStr];
               const isToday = dateStr === historyDates[0];
-              const pct = data && data.scheduled > 0
-                ? Math.round((data.completed / data.scheduled) * 100)
-                : 0;
+              const pct = data?.percentage ?? 0;
               const hasScheduledHabits = Boolean(data && !data.loading && data.scheduled > 0);
               const completionMap = new Map(data?.completions.map((completion) => [completion.habitId, completion]) ?? []);
               const dayHabits = hasScheduledHabits
-                ? habits.filter((habit) => isScheduledForDate(habit, dateStr) || completionMap.get(habit.id)?.completed)
+                ? habitDay(allHabits, data?.completions ?? [], dateStr).habits
                 : [];
               const completedHabits = dayHabits.filter((habit) => completionMap.get(habit.id)?.completed);
               const missedHabits = dayHabits.filter((habit) => !completionMap.get(habit.id)?.completed);
@@ -1204,7 +1172,7 @@ export default function ManageHabitsPage() {
       {/* ═══════════════════════════════════════════════════════ */}
       {/* Day Edit Modal */}
       {/* ═══════════════════════════════════════════════════════ */}
-      {editingDay && (
+      {editingDay && editingDay <= today && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget && !savingDay) setEditingDay(null); }}
           style={{
@@ -1266,6 +1234,7 @@ export default function ManageHabitsPage() {
               </button>
             </div>
 
+            {saveError && <p role="alert" style={{ color: "var(--error)", padding: "0 24px", fontSize: 13 }}>{saveError}</p>}
             {/* Habit checklist */}
             <div style={{ padding: "20px 24px 24px 24px", display: "flex", flexDirection: "column", gap: 8 }}>
               {editingDayScheduled.map((habit) => {
@@ -1401,11 +1370,11 @@ export default function ManageHabitsPage() {
             <div style={{ width: "100%", maxWidth: 380, padding: 24, borderRadius: 20, backgroundColor: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 24px 80px rgba(0, 0, 0, 0.35)" }}>
               <h2 style={{ margin: 0, color: "var(--primary)", fontSize: 18, fontWeight: 700 }}>Delete habit?</h2>
               <p style={{ margin: "8px 0 22px", color: "var(--secondary)", fontSize: 14, lineHeight: 1.5 }}>
-                This will permanently delete <span style={{ color: "var(--primary)", fontWeight: 700 }}>{habit.name}</span> and its completion history.
+                This will remove <span style={{ color: "var(--primary)", fontWeight: 700 }}>{habit.name}</span> from today and future days. Past days and their percentages are preserved.
               </p>
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => setListDeleteConfirm(null)} style={{ border: "none", borderRadius: 12, padding: "10px 14px", cursor: "pointer", backgroundColor: "var(--surface-variant)", color: "var(--primary)", fontSize: 13, fontWeight: 700 }}>Cancel</button>
-                <button type="button" onClick={async () => { await handleDelete(habit.id); setListDeleteConfirm(null); }} style={{ border: "none", borderRadius: 12, padding: "10px 14px", cursor: "pointer", backgroundColor: "var(--error)", color: "var(--primary)", fontSize: 13, fontWeight: 700 }}>Delete habit</button>
+                <button type="button" onClick={async () => { try { await handleDelete(habit.id); setListDeleteConfirm(null); } catch { /* The error is displayed above the habit list. */ } }} style={{ border: "none", borderRadius: 12, padding: "10px 14px", cursor: "pointer", backgroundColor: "var(--error)", color: "var(--primary)", fontSize: 13, fontWeight: 700 }}>Delete habit</button>
               </div>
             </div>
           </div>
