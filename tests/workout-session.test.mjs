@@ -21,6 +21,7 @@ function load(file, mocks) {
   const result = { exports: {} };
   new Function("require", "module", "exports", compiled)((name) => {
     if (name in mocks) return mocks[name];
+    if (name === "@/lib/workout-rep-range") return load("src/lib/workout-rep-range.ts", {});
     throw new Error(`Unexpected dependency: ${name}`);
   }, result, result.exports);
   return result.exports;
@@ -28,10 +29,12 @@ function load(file, mocks) {
 
 const catalogue = JSON.parse(fs.readFileSync(new URL("../src/data/exercise-catalogue.json", import.meta.url), "utf8"));
 const stretchCatalogue = JSON.parse(fs.readFileSync(new URL("../src/data/stretching-catalogue.json", import.meta.url), "utf8"));
+const schedule = load("src/lib/workout-schedule.ts", {});
 const coaching = load("src/lib/workout-coaching.ts", {});
 const debrief = load("src/components/workout-debrief.tsx", {
   "react/jsx-runtime": jsxRuntime,
   "@/lib/workout-coaching": coaching,
+    "@/lib/workout-schedule": schedule,
   "@/components/material-icon": { default: () => null, __esModule: true },
   "./workout-coaching.module.css": {},
 });
@@ -140,6 +143,7 @@ function serviceHarness({ failCompletion = false } = {}) {
     "@/lib/workout-session": builders,
     "@/lib/workout-personal-records": records,
     "@/lib/workout-coaching": coaching,
+    "@/lib/workout-schedule": schedule,
     "@/data/exercise-catalogue.json": catalogue,
     "@/data/stretching-catalogue.json": stretchCatalogue,
     "firebase/firestore": {
@@ -158,6 +162,34 @@ function serviceHarness({ failCompletion = false } = {}) {
   });
   return { service, store, writes };
 }
+
+test("routine-specific rep ranges survive Firestore serialization, session snapshots and repeats", async () => {
+  const { service, store } = serviceHarness();
+  const preset = workout();
+  preset.exercises[0].plannedRepsMax = 12;
+  const other = { ...workout(), id: "other", exercises: [{ ...preset.exercises[0], plannedReps: 4, plannedRepsMax: 6 }] };
+  await service.saveWorkout(preset);
+  await service.saveWorkout(other);
+  let saved;
+  service.subscribeToWorkouts("owner", (value) => { saved = value; });
+  assert.equal(saved.find((item) => item.id === preset.id).exercises[0].plannedRepsMax, 12);
+  assert.equal(saved.find((item) => item.id === other.id).exercises[0].plannedRepsMax, 6);
+  const active = createWorkoutSession("owner", preset);
+  active.exercises[0].sets[0] = { ...active.exercises[0].sets[0], weightLbs: 40, reps: 10, completed: true };
+  await service.saveWorkoutSession(active);
+  assert.equal(store.get(`workout_sessions/${active.id}`).exercises[0].plannedRepsMax, 12);
+  const completed = service.completeWorkoutSession(active);
+  const repeat = builders.createRepeatedTrainingSession("owner", completed);
+  assert.equal(repeat.exercises[0].plannedRepsMax, 12);
+  assert.ok(repeat.exercises[0].sets.every((set) => set.reps === null && !set.completed));
+  preset.exercises[0].plannedRepsMax = 15;
+  await service.saveWorkout(preset);
+  assert.equal(active.exercises[0].plannedRepsMax, 12);
+  assert.equal(store.get("workouts/other").exercises[0].plannedRepsMax, 6);
+  assert.equal(createWorkoutSession("owner", workout()).exercises[0].plannedRepsMax, undefined);
+  await assert.rejects(service.saveWorkout({ ...preset, exercises: [{ ...preset.exercises[0], plannedRepsMax: 7 }] }), /valid rep range/);
+  assert.equal(store.get(`workouts/${preset.id}`).exercises[0].plannedRepsMax, 15);
+});
 
 test("coaching evidence, weight increments, effort and warm-up labels survive saving and finishing", async () => {
   const { service, store } = serviceHarness();

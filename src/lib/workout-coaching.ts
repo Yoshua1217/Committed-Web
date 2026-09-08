@@ -1,3 +1,4 @@
+import { repRange } from "@/lib/workout-rep-range";
 import type { ExerciseCoaching, ExerciseCoachingBaseline, WorkoutDefinition, WorkoutExerciseLog, WorkoutSession } from "@/lib/types";
 
 export interface ExerciseTarget {
@@ -15,7 +16,7 @@ export function workingSets(exercise: Pick<WorkoutExerciseLog, "sets" | "loadTyp
 }
 
 function baseline(session: WorkoutSession, exercise: WorkoutExerciseLog): ExerciseCoachingBaseline {
-  return { sessionId: session.id, completedAt: session.completedAt!, loadType: exercise.loadType, plannedReps: exercise.plannedReps,
+  return { sessionId: session.id, completedAt: session.completedAt!, loadType: exercise.loadType, plannedReps: exercise.plannedReps, ...(exercise.plannedRepsMax !== undefined ? { plannedRepsMax: exercise.plannedRepsMax } : {}),
     effort: exercise.effort ?? null, sets: exercise.sets.map((set) => ({ ...set })) };
 }
 
@@ -47,14 +48,15 @@ function knownStep(exercise: WorkoutExerciseLog) {
 /** Transparent, conservative suggestions; never changes the routine or the logged fields. */
 export function exerciseTarget(exercise: WorkoutExerciseLog): ExerciseTarget {
   const count = exercise.sets.filter((set) => set.kind !== "warmup").length;
-  const reps = Math.max(1, Math.floor(exercise.plannedReps || 10));
+  const { min: reps, max: upperReps } = repRange(exercise);
+  const hasRange = upperReps > reps;
   const previous = exercise.coaching?.previous;
   const valid = previous ? workingSets(previous) : [];
   const target: ExerciseTarget = { action: "baseline", label: "Build a baseline", focus: "Log your working sets to guide your next session.",
     why: "There are no comparable completed working sets yet. Choose a manageable load for your saved rep target; warm-ups and unchecked sets do not drive progression.",
     sets: Array.from({ length: count }, () => ({ weightLbs: null, reps })), needsWeightStep: false };
   if (!valid.length) return target;
-  target.sets = Array.from({ length: count }, (_, index) => ({ weightLbs: exercise.loadType === "bodyweight" ? null : valid[index]?.weightLbs ?? null, reps: valid[index]?.reps ?? reps }));
+  target.sets = Array.from({ length: count }, (_, index) => ({ weightLbs: exercise.loadType === "bodyweight" ? null : valid[index]?.weightLbs ?? null, reps: hasRange ? Math.min(upperReps, valid[index]?.reps ?? reps) : valid[index]?.reps ?? reps }));
   target.action = "repeat"; target.label = "Repeat your target";
   target.focus = "Keep the load steady and repeat your working sets.";
   target.why = "Start from your last completed working sets. These are suggestions, and your logged values stay yours to choose.";
@@ -71,12 +73,15 @@ export function exerciseTarget(exercise: WorkoutExerciseLog): ExerciseTarget {
     target.why = "You marked the last exercise Harder. This lowers the rep demand without guessing a different weight. Choose a different target if that feedback no longer reflects how the exercise feels.";
     return target;
   }
-  const goalMet = valid.every((set) => set.reps! >= reps);
+  const goalMet = valid.every((set) => set.reps! >= upperReps);
   const earlier = exercise.coaching?.earlier;
   const oldSets = earlier ? workingSets(earlier) : [];
   const repeatedGoal = oldSets.length === count && earlier!.sets.filter((set) => set.kind !== "warmup").length === count
-    && oldSets.every((set, index) => set.reps! >= reps && set.weightLbs === valid[index].weightLbs);
-  const progressLoad = goalMet && (previous!.effort === "easier" || repeatedGoal);
+    && oldSets.every((set, index) => set.reps! >= upperReps && set.weightLbs === valid[index].weightLbs);
+  const consistentLoad = valid.every((set) => set.weightLbs === valid[0].weightLbs);
+  const loadThreshold = Math.max(reps, upperReps - 1);
+  const rangeReady = hasRange && consistentLoad && valid.every((set) => set.reps! >= loadThreshold);
+  const progressLoad = hasRange ? rangeReady : goalMet && (previous!.effort === "easier" || repeatedGoal);
   if (progressLoad && exercise.loadType !== "bodyweight") {
     const step = knownStep(exercise);
     const sensibleStep = step !== null && valid.every((set) => set.weightLbs! > 0 && step / set.weightLbs! <= 0.1)
@@ -85,17 +90,27 @@ export function exerciseTarget(exercise: WorkoutExerciseLog): ExerciseTarget {
       target.action = "weight"; target.label = exercise.loadType === "assistance" ? "Reduce assistance" : "Increase weight";
       target.needsWeightStep = step === null;
       target.focus = step === null ? "Set your available weight increment to see the next load." : `Try your next available ${exercise.loadType === "assistance" ? "assistance" : "weight"} at ${reps} reps.`;
-      target.why = `${previous!.effort === "easier" ? "You reached your rep target on every working set and marked it Easier than expected." : "You reached your rep target across all working sets at the same loads in two sessions."} ${step === null ? "No weight increment has been entered, so your previous loads remain visible until you choose one." : "The suggestion uses your entered weight increment; review the targets before following them."}`;
+      target.why = `${hasRange ? `All ${count} working sets reached at least ${loadThreshold} reps at the same load—within one rep of your ${upperReps}-rep maximum or higher. You’re ready for the next manageable step.` : previous!.effort === "easier" ? "You reached the top of your rep target on every working set and marked it Easier than expected." : "You reached the top of your rep target across all working sets at the same loads in two sessions."} ${step === null ? "No weight increment has been entered, so your previous loads remain visible until you choose one." : "The suggestion uses your entered weight increment; review the targets before following them."}`;
       if (step !== null) target.sets = target.sets.map((set) => ({ weightLbs: Math.round((set.weightLbs! + (exercise.loadType === "assistance" ? -step : step)) * 1000) / 1000, reps }));
       return target;
     }
   }
+  if (hasRange && goalMet) {
+    target.focus = exercise.loadType === "bodyweight" ? "Repeat the top of your rep range." : "Repeat the top of your rep range before increasing weight.";
+    target.why = exercise.loadType === "bodyweight" ? "You reached your upper rep target. Keep this range, or adjust the routine when you want a new rep goal." : consistentLoad ? "You reached the upper rep target. Confirm it across all working sets; a known, manageable weight step is needed before raising the load." : "Your working loads differed. Establish the same load across working sets before using the rep range to increase weight.";
+    return target;
+  }
   if (!goalMet || previous!.effort === "easier" || progressLoad) {
     target.action = "reps"; target.label = "Build your reps";
     const index = valid.reduce((best, set, i) => set.reps! < valid[best].reps! ? i : best, 0);
-    target.sets[index].reps += 1;
-    target.focus = `Aim for one more rep on working set ${index + 1}.`;
+    target.sets[index].reps = hasRange ? Math.min(upperReps, target.sets[index].reps + 1) : target.sets[index].reps + 1;
+    target.focus = `Aim for one more rep on working set ${index + 1}.${hasRange ? ` Build toward ${upperReps} reps across all working sets before increasing weight.` : ""}`;
     target.why = progressLoad ? "Your available weight jump is large, or this is a bodyweight exercise. A small rep increase keeps the next step manageable." : "Keep the same loads and add one rep to your lowest-rep working set. This builds consistency without asking every set to beat a PR.";
+    if (hasRange && consistentLoad && !rangeReady && exercise.loadType !== "bodyweight" && valid.every((set) => set.reps! >= Math.max(reps, upperReps - 2))) {
+      target.label = exercise.loadType === "assistance" ? "Nearly ready to reduce assistance" : "Nearly ready to increase weight";
+      target.focus = `You’re getting close to your ${upperReps}-rep maximum. Keep the load steady and aim for one more rep on working set ${index + 1}.`;
+      target.why = `Once every working set reaches ${loadThreshold} reps or more at the same load, you’ll be ready for a manageable ${exercise.loadType === "assistance" ? "reduction in assistance" : "weight increase"}. A stronger set doesn’t cancel out a set below that threshold.`;
+    }
   } else {
     target.focus = exercise.loadType === "bodyweight" ? "Repeat this performance before adding reps." : "Repeat this performance before increasing the load.";
     target.why = "You reached the saved rep target. Without easier-effort feedback or a second comparable session, the suggestion is to confirm that performance first.";

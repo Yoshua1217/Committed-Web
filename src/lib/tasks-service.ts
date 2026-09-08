@@ -45,6 +45,7 @@ export function subscribeToTasks(
   userId: string,
   callback: (tasks: Task[]) => void,
   includeDeleted = false,
+  onError?: () => void,
 ): () => void {
   const q = query(
     collection(db, COLLECTION_NAME),
@@ -71,6 +72,7 @@ export function subscribeToTasks(
     },
     (error) => {
       console.error("subscribeToTasks error:", error);
+      if (onError) { onError(); return; }
       tasks = [];
       callback([]);
     }

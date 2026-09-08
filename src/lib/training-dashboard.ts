@@ -1,4 +1,5 @@
-import type { WorkoutDefinition, WorkoutSession, WorkoutSessionType } from "@/lib/types";
+import type { WorkoutDay, WorkoutDefinition, WorkoutSession, WorkoutSessionType } from "@/lib/types";
+import { compareWorkoutTimes } from "@/lib/workout-schedule";
 
 export type TrainingSection = "train" | "routines" | "history";
 export type HistoryFilter = "all" | WorkoutSessionType;
@@ -59,7 +60,7 @@ export function latestRoutineSessions(sessions: WorkoutSession[]): Record<string
 export function todayTraining(workouts: WorkoutDefinition[], sessions: WorkoutSession[], today: string) {
   const weekday = (new Date(`${today}T12:00:00`).getDay() + 6) % 7;
   const todayWorkouts = workouts.filter((workout) => workout.scheduledDays.some((day) => day === weekday))
-    .slice().sort((a, b) => a.sortOrder - b.sortOrder)
+    .slice().sort((a, b) => compareWorkoutTimes(a, b, weekday as WorkoutDay, today))
     .map((workout) => ({ workout, completed: sessions.some((session) => session.status === "completed" && session.sessionType === "workout" && session.workoutId === workout.id && sessionDay(session) === today) }));
   const last = latestRoutineSessions(sessions);
   const recent = workouts.filter((workout) => last[`workout:${workout.id}`]).slice()
@@ -74,6 +75,12 @@ export function filterTrainingHistory(sessions: WorkoutSession[], query: string,
     && (!prsOnly || (session.sessionType === "workout" && session.personalRecords.length > 0))
     && (!search || [session.workoutNameSnapshot, ...session.exercises.map((exercise) => exercise.exerciseNameSnapshot), ...(session.stretches ?? []).map((stretch) => stretch.stretchNameSnapshot)].join(" ").toLocaleLowerCase().includes(search)))
     .slice().sort((a, b) => sessionDay(b).localeCompare(sessionDay(a)) || (b.completedAt ?? 0) - (a.completedAt ?? 0));
+}
+
+/** Use the performed date so backfilled sessions and the next day retain the correct recap. */
+export function latestWorkoutRecap(sessions: WorkoutSession[], workoutId: string, today: string) {
+  return filterTrainingHistory(sessions, "", "workout", false)
+    .find((session) => session.workoutId === workoutId && sessionDay(session) <= today);
 }
 
 export function groupTrainingHistory(sessions: WorkoutSession[]) {
@@ -94,7 +101,7 @@ export function nextScheduledWorkout(workouts: WorkoutDefinition[], sessions: Wo
     date.setDate(date.getDate() + offset);
     const day = localTrainingDate(date);
     const weekday = (date.getDay() + 6) % 7;
-    const workout = ordered.find((routine) => routine.scheduledDays.some((scheduledDay) => scheduledDay === weekday)
+    const workout = ordered.slice().sort((a, b) => compareWorkoutTimes(a, b, weekday as WorkoutDay, day)).find((routine) => routine.scheduledDays.some((scheduledDay) => scheduledDay === weekday)
       && !sessions.some((session) => session.status === "completed" && session.sessionType === "workout" && session.workoutId === routine.id && sessionDay(session) === day));
     if (workout) return { workout, day, label: offset === 0 ? "Today" : offset === 1 ? "Tomorrow" : date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) };
   }
@@ -114,7 +121,9 @@ export function latestTrainingRecords(sessions: WorkoutSession[]) {
 export function trainingPreview(workouts: WorkoutDefinition[], sessions: WorkoutSession[], today: string, selectedId = "") {
   const upcoming = nextScheduledWorkout(workouts, sessions, today);
   const selected = workouts.find((workout) => workout.id === selectedId);
-  const workout = selected ?? upcoming?.workout ?? todayTraining(workouts, sessions, today).recent[0]
+  const overview = todayTraining(workouts, sessions, today);
+  const scheduledToday = overview.todayWorkouts.find((item) => !item.completed) ?? overview.todayWorkouts[0];
+  const workout = selected ?? scheduledToday?.workout ?? upcoming?.workout ?? overview.recent[0]
     ?? workouts.slice().sort((a, b) => a.sortOrder - b.sortOrder)[0];
   if (!workout) return null;
   return { workout, label: workout.id === upcoming?.workout.id ? `Up next · ${upcoming.label}` : selected ? "Selected workout" : "Your next session" };

@@ -9,7 +9,8 @@ import styles from "./workout-flow.module.css";
 
 const catalogue = exerciseCatalogueJson as ExerciseDefinition[];
 
-export default function AddWorkoutExercisesModal({ existingIds, onClose, onAdd }: {
+export default function AddWorkoutExercisesModal({ existingIds, onClose, onAdd, context = "session" }: {
+  context?: "session" | "routine";
   existingIds: string[]; onClose: () => void; onAdd: (exercises: ExerciseDefinition[]) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -22,7 +23,7 @@ export default function AddWorkoutExercisesModal({ existingIds, onClose, onAdd }
   });
   function toggle(id: string) { setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }
 
-  return <WorkoutFlowDialog title="Add exercises" description="Choose as many as you like. Additions are saved to this session’s history; your saved workout stays the same." onClose={onClose}
+  return <WorkoutFlowDialog title="Add exercises" description={context === "routine" ? "Choose exercises for your routine, then adjust sets and reps in the editor." : "Choose as many as you like. Additions are saved to this session’s history; your saved workout stays the same."} onClose={onClose}
     footer={<><p className={styles.hint} aria-live="polite">{additions.length} selected · New exercises start with 3 sets of 10 reps.</p><button type="button" className={styles.primary} disabled={!additions.length} onClick={() => onAdd(additions)}>Add to workout{additions.length ? ` · ${additions.length}` : ""}</button></>}>
     <label className={styles.search}><MaterialIcon name="search" size={20} /><input aria-label="Search exercises" placeholder="Search exercises or muscle groups" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
     <div className={styles.list}>{matches.map((exercise) => {

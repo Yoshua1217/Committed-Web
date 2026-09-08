@@ -6,7 +6,9 @@ import ts from "typescript";
 const source = fs.readFileSync(new URL("../src/lib/training-dashboard.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const loaded = { exports: {} };
-new Function("module", "exports", compiled)(loaded, loaded.exports);
+const schedule = { exports: {} };
+new Function("module", "exports", ts.transpileModule(fs.readFileSync(new URL("../src/lib/workout-schedule.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText)(schedule, schedule.exports);
+new Function("require", "module", "exports", compiled)((name) => { if (name === "@/lib/workout-schedule") return schedule.exports; throw new Error(name); }, loaded, loaded.exports);
 const { weeklyTraining, todayTraining, filterTrainingHistory, groupTrainingHistory, latestRoutineSessions, nextScheduledWorkout, latestTrainingRecords, trainingPreview } = loaded.exports;
 const session = (id, day, type = "workout", seconds = 600) => ({
   id, userId: "owner", sessionType: type, workoutId: "routine", workoutNameSnapshot: "Upper body", status: "completed",
@@ -15,6 +17,25 @@ const session = (id, day, type = "workout", seconds = 600) => ({
   exercises: [{ exerciseId: "row", exerciseNameSnapshot: "Chest-Supported Row", sets: [] }], stretches: [], personalRecords: [],
 });
 const routine = (id, scheduledDays = []) => ({ id, name: id, description: "", scheduledDays, exercises: [], sortOrder: 0 });
+
+test("scheduled days allow any saved selection and retain today's completed workout before tomorrow", () => {
+  const workouts = [routine("today", [0]), routine("tomorrow", [1]), routine("unscheduled")];
+  const done = { ...session("done", "2026-09-07"), workoutId: "today" };
+  assert.equal(trainingPreview(workouts, [], "2026-09-07").workout.id, "today");
+  assert.equal(trainingPreview(workouts, [done], "2026-09-07").workout.id, "today");
+  assert.equal(trainingPreview(workouts, [done], "2026-09-07", "unscheduled").workout.id, "unscheduled");
+  assert.equal(trainingPreview(workouts, [done], "2026-09-08").workout.id, "tomorrow");
+});
+
+test("recaps use actual sessions, ignore other types and future dates, and persist after midnight", () => {
+  const done = session("done", "2026-09-07");
+  const logs = [session("old", "2026-09-06"), done, session("future", "2026-09-10"), session("activity", "2026-09-08", "activity"), { ...done, id: "draft", status: "active" }];
+  const original = structuredClone(logs);
+  assert.equal(loaded.exports.latestWorkoutRecap(logs, "routine", "2026-09-07"), done);
+  assert.equal(loaded.exports.latestWorkoutRecap(logs, "routine", "2026-09-08"), done);
+  assert.equal(loaded.exports.latestWorkoutRecap(logs, "missing", "2026-09-08"), undefined);
+  assert.deepEqual(logs, original);
+});
 
 test("rest-day coaching defaults to the next scheduled workout and allows unscheduled selections", () => {
   const workouts = [routine("freestyle"), routine("push", [0]), routine("pull", [2])];

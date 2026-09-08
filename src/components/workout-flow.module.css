@@ -1,5 +1,6 @@
 .dialog { width: min(560px, calc(100% - 32px)); max-width: none; max-height: calc(100dvh - 32px - var(--app-safe-top, 0px) - env(safe-area-inset-bottom)); margin: auto; padding: 0; border: 1px solid var(--border); border-radius: 22px; background: var(--surface); color: var(--primary); box-shadow: 0 24px 72px #0006; overflow: hidden; }
 .dialog::backdrop { background: #000a; }
+@media (max-width: 600px) { .mobileSheet { margin: auto 0 0; width: 100%; border-radius: 22px 22px 0 0; max-height: calc(100dvh - 24px - var(--app-safe-top, 0px)); padding-bottom: env(safe-area-inset-bottom); } }
 .panel { display: flex; flex-direction: column; max-height: inherit; }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 22px 22px 18px; flex-shrink: 0; }
 .header > button { flex-shrink: 0; }

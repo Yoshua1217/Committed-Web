@@ -17,6 +17,32 @@
 .exercise:first-of-type { padding-top: 0; }
 .exerciseName { margin: 0 0 8px; color: var(--primary); font-size: 15px; font-weight: 750; overflow-wrap: anywhere; }
 .target { padding: 13px 14px; border: 1px solid var(--border); border-left: 3px solid #ddd; border-radius: 11px; background: var(--background); text-align: left; }
+.trainingHeader { margin-bottom: 14px; padding: 15px 16px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-variant); }
+.trainingHeading { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.trainingTitle { flex: 1; min-width: 0; margin: 0; }
+.trainingToggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 0; min-height: 44px; border: 0; background: transparent; text-align: left; color: var(--secondary); cursor: pointer; }
+.trainingToggle > :last-child { flex-shrink: 0; }
+.trainingName { min-width: 0; overflow-wrap: anywhere; color: var(--primary); font-size: 18px; font-weight: 850; line-height: 1.35; }
+.trainingCue { display: block; margin-top: 4px; color: var(--secondary); font-size: 12px; font-weight: 500; line-height: 1.5; }
+.trainingContent { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.trainingContent .embeddedTarget { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.embeddedTarget .chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 7px; }
+.embeddedTarget .chip { border: 1px solid var(--border); border-radius: 11px; background: transparent; padding: 9px 10px; font-weight: 600; }
+.trainingToggle:focus-visible, .trainingHeading > button:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; border-radius: 6px; }
+.trainingContent > p > button { margin-left: 8px; }
+.trainingGoal { display: block; margin-top: 6px; color: var(--primary); font-size: 13px; font-weight: 600; line-height: 1.5; }
+.previousTarget { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--border); color: var(--secondary); font-size: 12px; line-height: 1.6; }
+.targets > .trainingHeader:last-child { margin-bottom: 0; }
+.targets > .trainingHeader { background: var(--background); border-color: color-mix(in srgb, var(--primary) 22%, transparent); padding: 18px; }
+.targets .trainingName { font-size: 19px; }
+.targets .trainingGoal { font-size: 14px; margin-top: 8px; }
+.targets .trainingContent { margin-top: 12px; padding-top: 12px; }
+.targets .planned, .targets .target p, .targets .previousTarget { color: var(--primary); opacity: .85; font-size: 13px; }
+.targets .embeddedTarget .chip { background: var(--surface-variant); border-color: color-mix(in srgb, var(--primary) 24%, transparent); padding: 12px; font-size: 14px; font-weight: 750; flex-direction: column; align-items: flex-start; gap: 5px; }
+.targets .chip small { color: var(--primary); opacity: .75; font-size: 11px; }
+.targets .chip small::before { content: "Set "; }
+.targets .quiet, .targets .explanation { color: var(--primary); }
+.targets .quiet { border: 1px solid var(--border); border-radius: 999px; padding: 8px 12px; margin-top: 10px; }
 .targetHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .targetLabel { color: var(--primary); font-size: 13px; font-weight: 800; display: inline-flex; gap: 6px; align-items: center; }
 .planned { font-size: 11px; color: var(--secondary); }

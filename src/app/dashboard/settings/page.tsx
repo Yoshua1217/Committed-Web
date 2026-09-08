@@ -9,6 +9,7 @@ import { subscribeToHabits } from "@/lib/habits-service";
 import { subscribeToBuckets } from "@/lib/buckets-service";
 import { isHabitPausedOnDate } from "@/lib/streak-calculator";
 import MaterialIcon from "@/components/material-icon";
+import HomeCalendarMapping from "@/components/home-calendar-mapping";
 
 const COMPLETION_TYPE_LABELS: Record<Habit["completionType"], string> = {
   checkbox: "Checkbox",
@@ -43,10 +44,13 @@ export default function SettingsPage() {
     workoutHabitMappingHabitId: null,
     stretchHabitMappingEnabled: false,
     stretchHabitMappingHabitId: null,
+    weightHabitMappingEnabled: false,
+    weightHabitMappingHabitId: null,
+    weightHabitMappingConfigured: false,
   });
   const [habits, setHabits] = useState<Habit[]>([]);
   const [buckets, setBuckets] = useState<Bucket[]>([]);
-  const [habitPickerType, setHabitPickerType] = useState<"workout" | "stretch" | null>(null);
+  const [habitPickerType, setHabitPickerType] = useState<"workout" | "stretch" | "weight" | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -77,8 +81,10 @@ export default function SettingsPage() {
   const activeHabits = habits.filter((habit) => !isHabitPausedOnDate(habit, todayString()));
   const selectedHabit = habits.find((habit) => habit.id === settings.workoutHabitMappingHabitId) ?? null;
   const selectedStretchHabit = habits.find((habit) => habit.id === settings.stretchHabitMappingHabitId) ?? null;
+  const selectedWeightHabit = habits.find((habit) => habit.id === settings.weightHabitMappingHabitId) ?? null;
+  const pickerIsWeight = habitPickerType === "weight";
   const pickerIsStretching = habitPickerType === "stretch";
-  const pickerHabitId = pickerIsStretching ? settings.stretchHabitMappingHabitId : settings.workoutHabitMappingHabitId;
+  const pickerHabitId = pickerIsWeight ? settings.weightHabitMappingHabitId : pickerIsStretching ? settings.stretchHabitMappingHabitId : settings.workoutHabitMappingHabitId;
   const bucketById = new Map(buckets.map((bucket) => [bucket.id, bucket]));
 
   const handleSave = useCallback(async () => {
@@ -95,7 +101,7 @@ export default function SettingsPage() {
   }, [user, settings]);
 
   const update = (field: keyof UserSettings, value: UserSettings[keyof UserSettings]) => {
-    setSettings((prev) => ({ ...prev, [field]: value }));
+    setSettings((prev) => ({ ...prev, [field]: value, ...(field.startsWith("weightHabitMapping") ? { weightHabitMappingConfigured: true } : {}) }));
     setSaved(false);
   };
 
@@ -130,7 +136,7 @@ export default function SettingsPage() {
     setResetError(null);
     try {
       await resetAccountData(user.uid);
-      setSettings({ darkMode: false, preferredName: "", mainGoals: "", mainStruggles: "", customPrompt: "", workoutHabitMappingEnabled: false, workoutHabitMappingHabitId: null, stretchHabitMappingEnabled: false, stretchHabitMappingHabitId: null });
+      setSettings({ darkMode: false, preferredName: "", mainGoals: "", mainStruggles: "", customPrompt: "", workoutHabitMappingEnabled: false, workoutHabitMappingHabitId: null, stretchHabitMappingEnabled: false, stretchHabitMappingHabitId: null, weightHabitMappingEnabled: false, weightHabitMappingHabitId: null, weightHabitMappingConfigured: false });
       setResetStarted(false);
       setResetSecondsRemaining(5);
       setResetProgress(0);
@@ -221,6 +227,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {user && <HomeCalendarMapping userId={user.uid} />}
+
       {/* AI Personalization */}
       <div
         style={{
@@ -282,6 +290,33 @@ export default function SettingsPage() {
             <p style={{ color: "var(--secondary)", fontSize: 12, margin: "0 0 10px" }}>Selected habit</p>
             <button type="button" onClick={() => setHabitPickerType("stretch")} style={{ width: "100%", minHeight: 46, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 12, background: "var(--background)", color: "var(--primary)", cursor: "pointer", textAlign: "left", fontSize: 14, fontWeight: 650 }}><span>{selectedStretchHabit?.name ?? "Choose a habit"}</span><span className="material-symbols-rounded" style={{ fontSize: 20, color: "var(--secondary)" }}>chevron_right</span></button>
             {!settings.stretchHabitMappingHabitId && <p style={{ color: "var(--secondary)", fontSize: 12, margin: "10px 0 0" }}>Choose the habit that should be checked off after stretching.</p>}
+          </div>
+        )}
+      </div>
+
+      <div
+        style={{
+          background: "var(--surface)", borderRadius: 16, border: "1px solid var(--border)",
+          padding: "20px 22px", marginBottom: 24,
+        }}
+      >
+        <div className="flex items-center justify-between" style={{ gap: 16 }}>
+          <div className="flex items-center gap-3">
+            <span className="material-symbols-rounded" style={{ fontSize: 22, color: "#2e9a5b" }}>monitor_weight</span>
+            <div>
+              <p style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)", margin: 0 }}>Weight logging habit mapping</p>
+              <p style={{ fontSize: 12, color: "var(--secondary)", margin: "2px 0 0", lineHeight: 1.4 }}>Automatically complete one habit when you save your daily weight.</p>
+            </div>
+          </div>
+          <button type="button" role="switch" aria-checked={settings.weightHabitMappingEnabled} aria-label="Enable weight logging habit mapping" onClick={() => update("weightHabitMappingEnabled", !settings.weightHabitMappingEnabled)} style={{ width: 48, height: 28, flexShrink: 0, borderRadius: 14, border: "none", cursor: "pointer", position: "relative", backgroundColor: settings.weightHabitMappingEnabled ? "#4CAF50" : "var(--surface-variant)", transition: "background-color 0.2s" }}>
+            <span style={{ width: 22, height: 22, borderRadius: "50%", backgroundColor: "#fff", position: "absolute", top: 3, left: settings.weightHabitMappingEnabled ? 23 : 3, transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)" }} />
+          </button>
+        </div>
+        {settings.weightHabitMappingEnabled && (
+          <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px solid var(--border)" }}>
+            <p style={{ color: "var(--secondary)", fontSize: 12, margin: "0 0 10px" }}>Selected habit</p>
+            <button type="button" onClick={() => setHabitPickerType("weight")} style={{ width: "100%", minHeight: 46, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 13px", border: "1px solid var(--border)", borderRadius: 12, background: "var(--background)", color: "var(--primary)", cursor: "pointer", textAlign: "left", fontSize: 14, fontWeight: 650 }}><span>{selectedWeightHabit?.name ?? "Choose a habit"}</span><span className="material-symbols-rounded" style={{ fontSize: 20, color: "var(--secondary)" }}>chevron_right</span></button>
+            {!settings.weightHabitMappingHabitId && <p style={{ color: "var(--secondary)", fontSize: 12, margin: "10px 0 0" }}>Choose the habit that should be checked off after logging your weight.</p>}
           </div>
         )}
       </div>
@@ -567,14 +602,14 @@ export default function SettingsPage() {
               <h2 id="workout-habit-picker-title" style={{ color: "var(--primary)", fontSize: 18, fontWeight: 750, margin: 0 }}>Choose a habit</h2>
               <button type="button" aria-label="Close habit picker" onClick={() => setHabitPickerType(null)} style={{ width: 34, height: 34, display: "grid", placeItems: "center", border: "none", borderRadius: 10, background: "var(--surface-variant)", color: "var(--primary)", cursor: "pointer" }}><span className="material-symbols-rounded">close</span></button>
             </div>
-            <p style={{ color: "var(--secondary)", fontSize: 13, lineHeight: 1.45, margin: "0 0 16px" }}>{pickerIsStretching ? "Finishing any stretching routine will complete this habit for that day." : "Finishing any workout or activity will complete this habit for that day."}</p>
+            <p style={{ color: "var(--secondary)", fontSize: 13, lineHeight: 1.45, margin: "0 0 16px" }}>{pickerIsWeight ? "Saving your daily weight will complete this habit for that day." : pickerIsStretching ? "Finishing any stretching routine will complete this habit for that day." : "Finishing any workout or activity will complete this habit for that day."}</p>
             {activeHabits.length ? (
               <div className="flex flex-col" style={{ gap: 6 }}>
                 {activeHabits.map((habit) => {
                   const selected = habit.id === pickerHabitId;
                   const bucket = bucketById.get(habit.bucketId);
                   const bucketColor = bucket ? argbToHex(bucket.color) : "var(--secondary)";
-                  return <button key={habit.id} type="button" onClick={() => { update(pickerIsStretching ? "stretchHabitMappingHabitId" : "workoutHabitMappingHabitId", habit.id); setHabitPickerType(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", border: selected ? "1px solid #4CAF50" : "1px solid var(--border)", borderRadius: 13, background: selected ? "#4CAF5018" : "var(--background)", color: "var(--primary)", textAlign: "left", cursor: "pointer" }}>
+                  return <button key={habit.id} type="button" onClick={() => { update(pickerIsWeight ? "weightHabitMappingHabitId" : pickerIsStretching ? "stretchHabitMappingHabitId" : "workoutHabitMappingHabitId", habit.id); setHabitPickerType(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", border: selected ? "1px solid #4CAF50" : "1px solid var(--border)", borderRadius: 13, background: selected ? "#4CAF5018" : "var(--background)", color: "var(--primary)", textAlign: "left", cursor: "pointer" }}>
                     <span style={{ width: 36, height: 36, display: "grid", placeItems: "center", flexShrink: 0, borderRadius: 11, background: bucket ? `${bucketColor}20` : "var(--surface-variant)", color: bucketColor }}><MaterialIcon name={bucket?.iconName || habit.iconName || "Category"} size={20} color={bucketColor} /></span>
                     <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14, fontWeight: 700 }}>{habit.name}</strong><small style={{ display: "block", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--secondary)", fontSize: 12, fontWeight: 600 }}>{bucket?.name ?? "No bucket"} · {COMPLETION_TYPE_LABELS[habit.completionType]}</small></span>
                     {selected ? <MaterialIcon name="check_circle" size={20} color="#2e9a5b" /> : <MaterialIcon name={COMPLETION_TYPE_ICONS[habit.completionType]} size={19} color="var(--secondary)" />}

@@ -60,7 +60,7 @@ export function createWorkoutSession(userId: string, workout?: WorkoutDefinition
     status: "active", personalRecords: [],
     exercises: (workout?.exercises ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder).flatMap((plan) => {
       const exercise = catalogue.find((item) => item.id === plan.exerciseId);
-      return exercise ? [exerciseLog(exercise, plan.sortOrder, plan.plannedSets, plan.plannedReps)] : [];
+      return exercise ? [{ ...exerciseLog(exercise, plan.sortOrder, plan.plannedSets, plan.plannedReps), ...(plan.plannedRepsMax !== undefined ? { plannedRepsMax: plan.plannedRepsMax } : {}) }] : [];
     }),
     createdAt: now, updatedAt: now,
   };

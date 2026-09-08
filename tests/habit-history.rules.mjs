@@ -111,7 +111,7 @@ test("real service creates, upgrades legacy defaults, completes, edits and soft-
   const history = loadModule("src/lib/habit-history.ts");
   const service = loadModule("src/lib/habits-service.ts", { "@/lib/firebase": { db: client }, "@/lib/habit-history": history, "firebase/firestore": firestore });
   const definition = { id: "integration", userId: "alice", name: "Charge laptop", bucketId: "", goalId: "", iconName: "Check", completionType: "checkbox", counterIncrement: 1, counterGoal: 10, timerGoalSeconds: 300, monday: true, tuesday: true, wednesday: true, thursday: true, friday: true, saturday: true, sunday: true, pausePeriods: [], reminderTime: null, sortOrder: 0, createdAt: 1 };
-  await service.saveHabit(definition);
+  await service.createHabit(definition);
   await service.saveCompletion({ ...completion, id: "integration", habitId: definition.id });
   await service.saveHabit({ ...definition, name: "Rename" });
   await service.deleteHabit(definition.id);
@@ -126,6 +126,46 @@ test("real service creates, upgrades legacy defaults, completes, edits and soft-
   assert.equal((await getDoc(doc(client, "habits/integration-legacy"))).data().history[today].name, "Legacy");
 });
 
+
+test("creation works with owner-only reads, including reminders, without weakening ownership", async () => {
+  // Reproduce the production failure: a nonexistent document has no owner.
+  const rules = fs.readFileSync(new URL("../firestore.rules", import.meta.url), "utf8")
+    .replaceAll("(isSignedIn() && resource == null) || isOwner(resource.data)", "isOwner(resource.data)");
+  const strictEnv = await initializeTestEnvironment({
+    projectId: "demo-habit-creation",
+    firestore: { host: "127.0.0.1", port: 8085, rules },
+  });
+  try {
+    const client = strictEnv.authenticatedContext("alice").firestore();
+    const history = loadModule("src/lib/habit-history.ts");
+    const service = loadModule("src/lib/habits-service.ts", {
+      "@/lib/firebase": { db: client }, "@/lib/habit-history": history, "firebase/firestore": firestore,
+    });
+    const definition = {
+      id: "new-reminder", userId: "alice", name: "Morning walk", bucketId: "", goalId: "",
+      iconName: "CheckCircle", completionType: "checkbox", counterIncrement: 1, counterGoal: 10,
+      timerGoalSeconds: 300, monday: true, tuesday: true, wednesday: true, thursday: true,
+      friday: true, saturday: true, sunday: true, reminderTime: "05:00", sortOrder: 0, createdAt: 1,
+    };
+    await assertFails(service.saveHabit(definition));
+    await assertSucceeds(service.createHabit(definition));
+    const ref = doc(client, "habits", definition.id);
+    const saved = (await getDoc(ref)).data();
+    assert.equal(saved.reminderTime, "05:00");
+    assert.equal(saved.createdOn, today);
+    assert.equal(saved.effectiveFrom, today);
+    assert.deepEqual(saved.history, {});
+    await assertSucceeds(service.createHabit({ ...definition, id: "no-reminder", reminderTime: null }));
+    assert.equal((await getDoc(doc(client, "habits/no-reminder"))).data().reminderTime, null);
+    await assertSucceeds(service.saveHabit({ ...definition, name: "Evening walk", reminderTime: "17:00" }));
+    assert.equal((await getDoc(ref)).data().reminderTime, "17:00");
+    await assertFails(service.createHabit({ ...definition, id: "foreign-owner", userId: "bob" }));
+    await assertFails(getDoc(doc(strictEnv.authenticatedContext("bob").firestore(), "habits", definition.id)));
+    await assertFails(setDoc(doc(strictEnv.unauthenticatedContext().firestore(), "habits/anonymous"), { ...saved, id: "anonymous" }));
+  } finally {
+    await strictEnv.cleanup();
+  }
+});
 
 test("manual corrections edit past results and retained deleted habits without backdating new habits", async () => {
   const original = { ...habit, id: "past-edit", createdAt: 1, createdOn: "2020-01-01" };

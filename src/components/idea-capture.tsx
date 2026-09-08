@@ -25,9 +25,10 @@ interface IdeaCaptureProps {
   userId: string;
   showToast?: boolean;
   autoFocus?: boolean;
+  compact?: boolean;
 }
 
-export default function IdeaCapture({ userId, showToast = false, autoFocus = false }: IdeaCaptureProps) {
+export default function IdeaCapture({ userId, showToast = false, autoFocus = false, compact = false }: IdeaCaptureProps) {
   const [text, setText] = useState("");
   const [starred, setStarred] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -64,9 +65,9 @@ export default function IdeaCapture({ userId, showToast = false, autoFocus = fal
   };
 
   return (
-    <div className="idea-capture-wrap">
-      <form className="idea-capture" onSubmit={handleSubmit}>
-        <button
+    <div className={`idea-capture-wrap${compact ? " idea-capture-wrap--compact" : ""}`}>
+      <form className={`idea-capture${compact ? " idea-capture--compact" : ""}`} onSubmit={handleSubmit}>
+        {!compact && <button
           type="button"
           className={`idea-star-button${starred ? " is-starred" : ""}`}
           onClick={() => setStarred((current) => !current)}
@@ -74,7 +75,7 @@ export default function IdeaCapture({ userId, showToast = false, autoFocus = fal
           aria-pressed={starred}
         >
           <IdeaStarIcon filled={starred} />
-        </button>
+        </button>}
         <input
           type="text"
           value={text}

@@ -77,7 +77,7 @@ function habitFromFirestore(data: Record<string, unknown>): Habit {
 export function subscribeToHabits(
   userId: string,
   callback: (habits: Habit[]) => void,
-  options: { includeDeleted?: boolean } = {}
+  options: { includeDeleted?: boolean; onError?: () => void; keepPreviousOnError?: boolean } = {}
 ): () => void {
   const q = query(
     collection(db, "habits"),
@@ -92,14 +92,16 @@ export function subscribeToHabits(
     callback(habits);
   }, (error) => {
     console.error("subscribeToHabits error:", error);
-    callback([]);
+    options.onError?.();
+    if (!options.keepPreviousOnError) callback([]);
   });
 }
 
 export function subscribeToCompletionsForDate(
   userId: string,
   date: string,
-  callback: (completions: HabitCompletion[]) => void
+  callback: (completions: HabitCompletion[]) => void,
+  onError?: () => void,
 ): () => void {
   const q = query(
     collection(db, "habit_completions"),
@@ -114,7 +116,8 @@ export function subscribeToCompletionsForDate(
     callback(completions);
   }, (error) => {
     console.error("subscribeToCompletionsForDate error:", error);
-    callback([]);
+    if (onError) onError();
+    else callback([]);
   });
 }
 
@@ -151,6 +154,12 @@ function habitToFirestore(habit: Habit) {
     history: habit.history ?? {},
     utcOffsetMinutes: -new Date().getTimezoneOffset(),
   };
+}
+
+/** New IDs have no owner to authorize a read under owner-only Firestore rules. */
+export async function createHabit(habit: Habit): Promise<void> {
+  const saved = preserveHabitHistory(null, { ...habit, deletedOn: null });
+  await setDoc(doc(db, "habits", habit.id), habitToFirestore(saved));
 }
 
 export async function saveHabit(habit: Habit): Promise<void> {

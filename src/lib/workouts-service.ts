@@ -1,5 +1,7 @@
+import { validRepRange } from "@/lib/workout-rep-range";
 import { db } from "@/lib/firebase";
 import { ActivityDefinition, ActivityIntensity, StretchRoutineDefinition, WorkoutDefinition, WorkoutExerciseLog, WorkoutSession } from "@/lib/types";
+import { normalizeWorkoutTimes, normalizeWorkoutTimeOverrides } from "@/lib/workout-schedule";
 import exerciseCatalogueJson from "@/data/exercise-catalogue.json";
 import { ExerciseDefinition } from "@/lib/types";
 import stretchCatalogueJson from "@/data/stretching-catalogue.json";
@@ -116,6 +118,8 @@ function workoutFromFirestore(data: Record<string, unknown>): WorkoutDefinition 
   return {
     id: (data.id as string) ?? "", userId: (data.userId as string) ?? "", name: (data.name as string) ?? "", description: (data.description as string) ?? "",
     scheduledDays: Array.isArray(data.scheduledDays) ? data.scheduledDays.map(Number) as WorkoutDefinition["scheduledDays"] : [],
+    scheduledStartTimes: normalizeWorkoutTimes(Array.isArray(data.scheduledDays) ? data.scheduledDays as WorkoutDefinition["scheduledDays"] : [], data.scheduledStartTimes),
+    scheduledTimeOverrides: normalizeWorkoutTimeOverrides(data.scheduledTimeOverrides),
     exercises: Array.isArray(data.exercises) ? data.exercises as WorkoutDefinition["exercises"] : [],
     sortOrder: Number(data.sortOrder ?? 0), createdAt: Number(data.createdAt ?? 0), updatedAt: Number(data.updatedAt ?? 0),
   };
@@ -217,7 +221,8 @@ export async function getWorkoutCoachingHistory(userId: string): Promise<Workout
 }
 
 export async function saveWorkout(workout: WorkoutDefinition): Promise<void> {
-  await setDoc(doc(db, "workouts", workout.id), workout);
+  if (workout.exercises.some((plan) => !validRepRange(plan))) throw new Error("Enter a valid rep range. Maximum reps must be at least minimum reps.");
+  await setDoc(doc(db, "workouts", workout.id), { ...workout, scheduledStartTimes: normalizeWorkoutTimes(workout.scheduledDays, workout.scheduledStartTimes) });
 }
 
 export async function deleteWorkout(workoutId: string): Promise<void> {
@@ -226,6 +231,11 @@ export async function deleteWorkout(workoutId: string): Promise<void> {
 
 export async function saveStretchRoutine(routine: StretchRoutineDefinition): Promise<void> {
   await setDoc(doc(db, "stretch_routines", routine.id), routine);
+}
+
+/** Removes a saved stretch template without affecting completed routine history. */
+export async function deleteStretchRoutine(routineId: string): Promise<void> {
+  await deleteDoc(doc(db, "stretch_routines", routineId));
 }
 
 export async function saveWorkoutSession(session: WorkoutSession): Promise<void> {

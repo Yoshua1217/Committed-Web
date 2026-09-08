@@ -5,8 +5,8 @@ import MaterialIcon from "@/components/material-icon";
 import type { WorkoutDefinition } from "@/lib/types";
 import styles from "./workout-routine-select.module.css";
 
-export default function WorkoutRoutineSelect({ workouts, value, onChange }: {
-  workouts: WorkoutDefinition[]; value: string; onChange: (id: string) => void;
+export default function WorkoutRoutineSelect({ workouts, value, onChange, todayIds = [] }: {
+  workouts: WorkoutDefinition[]; value: string; onChange: (id: string) => void; todayIds?: string[];
 }) {
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -45,7 +45,7 @@ export default function WorkoutRoutineSelect({ workouts, value, onChange }: {
   return <div ref={root} className={styles.root} onBlur={(event) => {
     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
   }}>
-    <span id={`${id}-label`} className={styles.label}>Workout to preview</span>
+    <span id={`${id}-label`} className={styles.label}>Choose your workout</span>
     <div className={styles.control}>
       <button ref={trigger} type="button" className={styles.trigger} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? `${id}-list` : undefined} aria-labelledby={`${id}-label ${id}-value`}
         onClick={() => open ? setOpen(false) : show()} onKeyDown={(event) => {
@@ -67,7 +67,7 @@ export default function WorkoutRoutineSelect({ workouts, value, onChange }: {
         }
       }}>
         {workouts.map((workout, index) => <li key={workout.id} ref={(element) => { options.current[index] = element; }} role="option" aria-selected={workout.id === value} tabIndex={focused === index ? 0 : -1} className={styles.option} onFocus={() => setFocused(index)} onClick={() => choose(index)}>
-          <span className={styles.optionText}><span className={styles.optionName}>{workout.name}</span><span className={styles.meta}>{workout.exercises.length} exercise{workout.exercises.length === 1 ? "" : "s"}</span></span>
+          <span className={styles.optionText}><span className={styles.optionName}>{workout.name}</span><span className={styles.meta}>{todayIds.includes(workout.id) ? "Scheduled today · " : ""}{workout.exercises.length} exercise{workout.exercises.length === 1 ? "" : "s"}</span></span>
           {workout.id === value && <MaterialIcon name="check" size={18} />}
         </li>)}
       </ul>}

@@ -1,9 +1,10 @@
 "use client";
+import { formatRepRange } from "@/lib/workout-rep-range";
 
 import { type TouchEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Haptics } from "@capacitor/haptics";
-import { ExerciseEffortFeedback, ExerciseTargetPanel } from "@/components/exercise-coaching";
+import { ExerciseEffortFeedback, ExerciseTrainingHeader } from "@/components/exercise-coaching";
 import { attachWorkoutCoaching } from "@/lib/workout-coaching";
 import MaterialIcon from "@/components/material-icon";
 import AddWorkoutExercisesModal from "@/components/add-workout-exercises-modal";
@@ -334,13 +335,14 @@ export default function ActiveWorkoutScreen({ session: initialSession, history, 
         {isPreviousWorkout && <button type="button" onClick={() => setWorkoutDetailsOpen(true)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 0 18px", border: "none", background: "transparent", color: "var(--secondary)", fontSize: 13, cursor: "pointer" }}><MaterialIcon name="calendar_month" size={18} />{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(session.performedAt ?? session.startedAt))}<MaterialIcon name="edit" size={14} /></button>}
         {session.exercises.slice().sort((a, b) => a.sortOrder - b.sortOrder).map((exercise) => (
           <section key={exercise.exerciseId} className="active-exercise-section">
-            <div className="active-exercise-header">
+            {isPreviousWorkout ? (
+              <div className="active-exercise-header">
               <div className="flex items-center" style={{ gap: 11, minWidth: 0 }}>
                 <button type="button" aria-label={`Options for ${exercise.exerciseNameSnapshot}`} aria-haspopup="dialog" disabled={finishing || quitting} onClick={() => { setExerciseOptionsId(exercise.exerciseId); setRemoveExerciseError(""); }} style={{ width: 32, minHeight: 40, display: "grid", placeItems: "center", padding: 0, border: "none", borderRadius: 9, flexShrink: 0, background: "transparent", color: "var(--secondary)", cursor: "pointer" }}><MaterialIcon name="more_vert" size={22} /></button>
-                <div style={{ minWidth: 0 }}><h2 style={{ color: "var(--primary)", fontSize: 18, fontWeight: 850, margin: "0 0 3px", overflowWrap: "anywhere" }}>{exercise.exerciseNameSnapshot}</h2>{isPreviousWorkout && <p style={{ color: "var(--secondary)", fontSize: 12, fontWeight: 700, margin: 0 }}>{exercise.plannedSets} planned sets × {exercise.plannedReps} reps</p>}</div>
+                <div style={{ minWidth: 0 }}><h2 style={{ color: "var(--primary)", fontSize: 18, fontWeight: 850, margin: "0 0 3px", overflowWrap: "anywhere" }}>{exercise.exerciseNameSnapshot}</h2>{isPreviousWorkout && <p style={{ color: "var(--secondary)", fontSize: 12, fontWeight: 700, margin: 0 }}>{exercise.plannedSets} planned sets × {formatRepRange(exercise)} reps</p>}</div>
               </div>
             </div>
-            {!isPreviousWorkout && <div style={{ margin: "-6px 0 18px" }}>{exercise.coaching ? <ExerciseTargetPanel exercise={exercise} onIncrementChange={(value) => updateExercise(exercise.exerciseId, (current) => ({ ...current, weightIncrementLbs: value }))} /> : <p style={{ fontSize: 12, color: "var(--secondary)" }}>{coachingError ? "Targets are unavailable. You can still log your workout." : "Loading your targets…"}{coachingError && <button type="button" onClick={() => setHistoryRetry((value) => value + 1)} style={{ marginLeft: 8, color: "var(--primary)", background: "transparent", border: 0, cursor: "pointer" }}>Retry</button>}</p>}</div>}
+            ) : <ExerciseTrainingHeader exercise={exercise} options={<button type="button" aria-label={`Options for ${exercise.exerciseNameSnapshot}`} aria-haspopup="dialog" disabled={finishing || quitting} onClick={() => { setExerciseOptionsId(exercise.exerciseId); setRemoveExerciseError(""); }} style={{ width: 32, minHeight: 40, display: "grid", placeItems: "center", padding: 0, border: "none", borderRadius: 9, flexShrink: 0, background: "transparent", color: "var(--secondary)", cursor: "pointer" }}><MaterialIcon name="more_vert" size={22} /></button>} error={Boolean(coachingError)} onRetry={() => setHistoryRetry((value) => value + 1)} onIncrementChange={(value) => updateExercise(exercise.exerciseId, (current) => ({ ...current, weightIncrementLbs: value }))} />}
             <div className="active-set-grid active-set-heading"><span>Set</span><span>Prev</span><span>{weightLabel(exercise.loadType)}</span><span>Reps</span><span /></div>
             <div className="flex flex-col" style={{ gap: 8 }}>
               {exercise.sets.map((set, index) => {

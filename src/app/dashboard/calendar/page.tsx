@@ -1,5 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import WorkoutPreviewModal from "@/components/workout-preview-modal";
+import { subscribeToWorkouts, subscribeToCompletedWorkoutSessions, saveWorkout, deleteWorkout } from "@/lib/workouts-service";
+import { WORKOUT_CALENDAR_ID, workoutCalendarOccurrences } from "@/lib/workout-calendar";
+import { formatWorkoutTime, workoutTimeOn } from "@/lib/workout-schedule";
+import type { WorkoutDefinition, WorkoutSession } from "@/lib/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Task, Project, Goal, Bucket } from "@/lib/types";
 import { saveTask, subscribeToTasks } from "@/lib/tasks-service";
@@ -45,8 +51,9 @@ type CalendarView = "week" | "day" | "month";
 type GoogleCalendar = SyncedGoogleCalendar;
 type GoogleCalendarEvent = SyncedGoogleCalendarEvent;
 
-function CalendarItemTitle({ event }: { event: GoogleCalendarEvent }) {
+function CalendarItemTitle({ event, showTime = false }: { event: GoogleCalendarEvent; showTime?: boolean }) {
   const title = event.summary ?? "Untitled event";
+  if (event.calendarId === WORKOUT_CALENDAR_ID) return <span className="calendar-item-title"><svg className="calendar-task-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 8v8M3 10v4M18 8v8M21 10v4M6 12h12" /></svg><span className="calendar-item-title-text">{showTime && event.start?.dateTime ? `${new Date(event.start.dateTime).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · ` : ""}{title}</span></span>;
   if (event.calendarId !== "committed-tasks") return <>{title}</>;
   const completed = title.startsWith("✓ ");
   return <span className="calendar-item-title"><svg className="calendar-task-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="2.5" y="2.5" width="15" height="15" rx="4" /><path d="m6 10 2.6 2.6L14 7" /></svg><span className="calendar-item-title-text">{completed ? title.slice(2) : title}</span></span>;
@@ -202,13 +209,6 @@ function allDayEventOccursOn(event: GoogleCalendarEvent, day: Date) {
   return key >= start && (!event.end?.date || key < event.end.date);
 }
 
-function hasAllDayEventPassed(event: GoogleCalendarEvent, now: Date) {
-  const today = dateKey(now);
-  // Google all-day end dates are exclusive, so an event ending today was
-  // active yesterday and should now be dimmed.
-  return event.end?.date ? event.end.date <= today : Boolean(event.start?.date && event.start.date < today);
-}
-
 function calendarCheckboxColor(calendar: GoogleCalendar) {
   // The native checkbox uses a white check on Google Calendar's darker red.
   // A slightly lighter Google-red keeps Math consistent with the other layers.
@@ -270,6 +270,22 @@ export default function CalendarPage() {
   const [taskGoals, setTaskGoals] = useState<Goal[]>([]);
   const [taskBuckets, setTaskBuckets] = useState<Bucket[]>([]);
   const [sidebarTab, setSidebarTab] = useState<"layers" | "unscheduled">("layers");
+  const router = useRouter();
+  const [showWorkouts, setShowWorkouts] = useState(true);
+  const [workoutRoutines, setWorkoutRoutines] = useState<WorkoutDefinition[]>([]);
+  const [workoutHistory, setWorkoutHistory] = useState<WorkoutSession[]>([]);
+  const [workoutLoadError, setWorkoutLoadError] = useState(false);
+  const [workoutHistoryError, setWorkoutHistoryError] = useState(false);
+  const [workoutLoading, setWorkoutLoading] = useState(true);
+  const [workoutRetry, setWorkoutRetry] = useState(0);
+  const [selectedWorkoutOccurrence, setSelectedWorkoutOccurrence] = useState<string | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    setShowWorkouts(localStorage.getItem(`committed-workout-layer:${user.uid}`) !== "hidden");
+    const stopWorkouts = subscribeToWorkouts(user.uid, (items) => { setWorkoutRoutines(items); setWorkoutLoading(false); setWorkoutLoadError(false); }, () => { setWorkoutLoading(false); setWorkoutLoadError(true); });
+    const stopHistory = subscribeToCompletedWorkoutSessions(user.uid, (items) => { setWorkoutHistory(items); setWorkoutHistoryError(false); }, () => setWorkoutHistoryError(true));
+    return () => { stopWorkouts(); stopHistory(); };
+  }, [user, workoutRetry]);
   const [showTasks, setShowTasks] = useState(true);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [viewingTaskId, setViewingTaskId] = useState<string | null>(null);
@@ -753,6 +769,7 @@ export default function CalendarPage() {
   };
 
   const requestEventMutation = (mutation: EventMutation) => {
+    if (mutation.event.calendarId === WORKOUT_CALENDAR_ID) return;
     const task = tasks.find((item) => mutation.event.id === `committed-task:${item.id}`);
     if (task) {
       if (mutation.kind === "delete") { setSchedulingTask(task); return; }
@@ -822,9 +839,16 @@ export default function CalendarPage() {
       start: block ? { dateTime: block.start.toISOString() } : { date: day! },
       end: block ? { dateTime: block.end.toISOString() } : { date: addIsoDateDays(day!, 1) } }];
   });
-  const visibleEvents = [...events.filter((event) => visibleCalendarIds.includes(event.calendarId) && !tasks.some((task) => task.calendarLink?.eventId === event.id && task.calendarLink?.calendarId === event.calendarId)), ...(showTasks ? taskEvents : [])];
-  const displayCalendars = [...calendars, taskCalendar];
+  const workoutRangeStart = view === "month" ? startOfWeek(new Date(focusDate.getFullYear(), focusDate.getMonth(), 1)) : view === "week" ? startOfWeek(focusDate) : focusDate;
+  const workoutRangeEnd = addDays(workoutRangeStart, view === "month" ? 41 : view === "week" ? 6 : 0);
+  const workoutEvents = workoutCalendarOccurrences(workoutRoutines, workoutHistory, workoutRangeStart, workoutRangeEnd);
+  const selectedWorkoutEvent = workoutEvents.find((event) => event.id === selectedWorkoutOccurrence);
+  const selectedWorkout = workoutRoutines.find((workout) => workout.id === selectedWorkoutEvent?.workoutId);
+  const workoutCalendar: GoogleCalendar = { id: WORKOUT_CALENDAR_ID, summary: "Workouts", backgroundColor: "#659772", accessRole: "reader" };
+  const visibleEvents = [...events.filter((event) => visibleCalendarIds.includes(event.calendarId) && !tasks.some((task) => task.calendarLink?.eventId === event.id && task.calendarLink?.calendarId === event.calendarId)), ...(showTasks ? taskEvents : []), ...(showWorkouts && !workoutLoadError ? workoutEvents : [])];
+  const displayCalendars = [...calendars, taskCalendar, workoutCalendar];
   const selectCalendarEvent = (event: GoogleCalendarEvent) => {
+    if (event.calendarId === WORKOUT_CALENDAR_ID) { setSelectedWorkoutOccurrence(event.id); return; }
     const task = tasks.find((item) => event.id === `committed-task:${item.id}`);
     if (task) setViewingTaskId(task.id);
     else setSelectedEvent(event);
@@ -891,8 +915,11 @@ export default function CalendarPage() {
           <section className="calendar-layers">
             <p>My calendars</p>
             <label className="calendar-layer"><input type="checkbox" checked={showTasks} onChange={(event) => { setShowTasks(event.target.checked); if (user) localStorage.setItem(`committed-task-layer:${user.uid}`, event.target.checked ? "visible" : "hidden"); }} style={{ accentColor: "#6e9fdb" }} />Tasks</label>
+            <label className="calendar-layer"><input type="checkbox" checked={showWorkouts} onChange={(event) => { setShowWorkouts(event.target.checked); if (user) localStorage.setItem(`committed-workout-layer:${user.uid}`, event.target.checked ? "visible" : "hidden"); }} style={{ accentColor: "#659772" }} />Workouts</label>
+            {showWorkouts && workoutLoading && <p role="status">Loading workouts…</p>}
+            {showWorkouts && (workoutLoadError || workoutHistoryError) && <p role="alert" className="planning-error">{workoutLoadError ? "Workout schedules couldn’t load." : "Workout completion history couldn’t load."} <button type="button" onClick={() => setWorkoutRetry((value) => value + 1)}>Retry</button></p>}
             {calendars.length === 0
-              ? <span className="calendar-empty-layers">{syncError ?? "Connect Google Calendar to see your schedule."}</span>
+              ? <span className="calendar-empty-layers">{syncError ?? "Connect Google Calendar to add your Google events."}</span>
               : calendars.map((calendar) => <label className="calendar-layer" key={calendar.id} draggable onDragStart={() => setDraggedCalendarId(calendar.id)} onDragEnd={() => setDraggedCalendarId(null)} onDragOver={(dragEvent) => dragEvent.preventDefault()} onDrop={() => { if (draggedCalendarId) moveCalendar(draggedCalendarId, calendar.id); setDraggedCalendarId(null); }} style={{ opacity: draggedCalendarId === calendar.id ? 0.55 : 1 }}>
                 <span className="material-symbols-rounded" aria-hidden="true" style={{ color: "var(--secondary)", fontSize: 16, cursor: "grab" }}>drag_indicator</span>
                 <input type="checkbox" checked={visibleCalendarIds.includes(calendar.id)} onChange={() => toggleCalendarVisibility(calendar.id)} aria-label={`Show ${calendar.summary}`} style={{ accentColor: calendarCheckboxColor(calendar) }} />
@@ -926,6 +953,7 @@ export default function CalendarPage() {
       {schedulingTask && <TaskTimeBlockDialog key={schedulingTask.id} task={tasks.find((task) => task.id === schedulingTask.id) ?? schedulingTask} date={focusDate} onClose={() => setSchedulingTask(null)} onEdit={() => { setEditingTask(schedulingTask); setSchedulingTask(null); }} onSave={async (task) => { await saveTask(task); if (task.startDateTime) setFocusDate(new Date(task.startDateTime)); setCalendarNotice(calendarSyncPreferences.featureCalendarMappings.tasks ? "Task saved. Google sync will run when connected." : "Task saved to your calendar."); }} />}
       <TaskEditModal isOpen={editingTask !== null} task={editingTask} onClose={() => setEditingTask(null)} onSave={saveTask} goals={taskGoals} buckets={taskBuckets} userId={user?.uid ?? ""} nextSortOrder={tasks.length} />
       <TaskDetailsModal isOpen={!!viewingTask} task={viewingTask} goals={taskGoals} buckets={taskBuckets} onClose={() => setViewingTaskId(null)} onEdit={() => { setEditingTask(viewingTask); setViewingTaskId(null); }} />
+      {selectedWorkout && selectedWorkoutEvent && <WorkoutPreviewModal workout={selectedWorkout} occurrenceLabel={`${new Date(`${selectedWorkoutEvent.scheduledDate}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ${formatWorkoutTime(workoutTimeOn(selectedWorkout, selectedWorkoutEvent.scheduledDate))} · About ${selectedWorkoutEvent.estimatedMinutes} min (estimated)${selectedWorkoutEvent.completed ? " · Completed" : ""}`} startLabel="Go to Train" onExit={() => setSelectedWorkoutOccurrence(null)} onStart={() => router.push("/dashboard/workouts")} onSave={saveWorkout} onDelete={async (workout) => { await deleteWorkout(workout.id); setSelectedWorkoutOccurrence(null); }} />}
       {selectedEvent && <CalendarEventModal event={selectedEvent} calendar={calendars.find((calendar) => calendar.id === selectedEvent.calendarId)} onClose={() => setSelectedEvent(null)} onEdit={isEventWritable(selectedEvent, calendars.find((calendar) => calendar.id === selectedEvent.calendarId)) ? () => openEditEditor(selectedEvent) : undefined} />}
       {editorState && <CalendarEventEditorModal key={editorState.event?.id ?? "new"} event={editorState.event} preset={editorState.preset} calendars={writableCalendars} saving={savingEvent || Boolean(eventActionPrompt)} error={editorError} onClose={() => !savingEvent && !eventActionPrompt && setEditorState(null)} onSave={(draft) => void saveEditorEvent(draft)} onEditSeries={() => void openSeriesEditor()} onDelete={editorState.event ? () => requestEventMutation({ kind: "delete", event: editorState.event! }) : undefined} />}
       {eventActionPrompt && <CalendarActionPrompt prompt={eventActionPrompt} onCancel={() => setEventActionPrompt(null)} onOccurrence={(mutation) => continueEventMutation(mutation, "occurrence")} onSeries={(mutation) => continueEventMutation(mutation, "series")} onGuests={(mutation, scope, sendUpdates) => void executeEventMutation(mutation, scope, sendUpdates)} />}
@@ -965,7 +993,12 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
   const today = dateKey(now);
   const currentTimeTop = (now.getHours() + now.getMinutes() / 60) * HOUR_HEIGHT;
   const daySignature = days.map(dateKey).join("|");
-  const hasAllDayEvents = events.some((event) => event.start?.date && days.some((day) => allDayEventOccursOn(event, day)));
+  const allDayEventCounts = days.map((day) => events.filter((event) => allDayEventOccursOn(event, day)).length);
+  const maxAllDayEvents = Math.max(0, ...allDayEventCounts);
+  const hasAllDayEvents = maxAllDayEvents > 0;
+  // Keep the header tall enough for readable all-day labels instead of letting
+  // additional events overlap the timed grid below.
+  const allDayHeaderHeight = hasAllDayEvents ? 34 + maxAllDayEvents * 22 : 36;
 
   useEffect(() => {
     const current = new Date();
@@ -1285,7 +1318,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
   };
 
   return <div className={`calendar-time-view ${view === "day" ? "day-view" : "week-view"}${daySwipeSettling ? " day-swipe-settling" : ""}`} onPointerDown={beginDaySwipe} onPointerMove={updateDaySwipe} onPointerUp={finishDaySwipe} onPointerCancel={cancelDaySwipe} style={{ transform: view === "day" ? `translateX(${daySwipeOffset}px)` : undefined }}>
-    <div className="calendar-time-header" ref={headerRef} style={{ "--day-count": days.length, flexBasis: hasAllDayEvents ? 58 : 36 } as React.CSSProperties}>
+    <div className="calendar-time-header" ref={headerRef} style={{ "--day-count": days.length, flexBasis: allDayHeaderHeight } as React.CSSProperties}>
       <div />
       {days.map((day) => <div key={dateKey(day)} className={dateKey(day) === today ? "current-day" : ""} onClick={() => onCreateEvent({ start: new Date(`${dateKey(day)}T00:00:00`), end: new Date(`${addIsoDateDays(dateKey(day), 1)}T00:00:00`), allDay: true })} style={hasAllDayEvents ? { flexDirection: "column", gap: 0, padding: "3px 3px 2px", cursor: "pointer" } : { cursor: "pointer" }}>
         <div style={hasAllDayEvents ? { display: "flex", alignItems: "center", gap: 6, height: 25 } : undefined}><span className="calendar-mobile-full-day-label">{fullDayHeader(day)}</span><span className="calendar-day-short-label">{day.toLocaleDateString(undefined, { weekday: "short" })}</span><strong>{day.getDate()}</strong></div>
@@ -1293,7 +1326,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
           const editable = isEventWritable(event, calendars.find((calendar) => calendar.id === event.calendarId));
           const isFirstDay = event.start?.date === dateKey(day);
           const isLastDay = addIsoDateDays(event.end?.date ?? addIsoDateDays(event.start!.date!, 1), -1) === dateKey(day);
-          return <button type="button" className="calendar-all-day-header-event" key={`${event.calendarId}-${event.id}`} onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "move")} onPointerMove={updateAllDayGesture} onPointerUp={finishAllDayGesture} onPointerCancel={() => { allDayGestureRef.current = null; }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!suppressEventClickRef.current) onSelectEvent(event); }} style={{ width: "100%", minHeight: 16, overflow: "hidden", marginTop: 1, padding: "1px 8px", border: 0, borderRadius: 4, background: mutedCalendarColor(event.color), color: "#121820", cursor: editable ? "grab" : "pointer", touchAction: editable ? "none" : undefined, fontSize: 9, fontWeight: 750, lineHeight: "14px", textAlign: "left", textOverflow: "ellipsis", whiteSpace: "nowrap", filter: hasAllDayEventPassed(event, now) ? "brightness(.72) saturate(.82)" : undefined, opacity: hasAllDayEventPassed(event, now) ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
+          return <button type="button" data-workout={event.calendarId === WORKOUT_CALENDAR_ID || undefined} className="calendar-all-day-header-event" key={`${event.calendarId}-${event.id}`} onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "move")} onPointerMove={updateAllDayGesture} onPointerUp={finishAllDayGesture} onPointerCancel={() => { allDayGestureRef.current = null; }} onClick={(clickEvent) => { clickEvent.stopPropagation(); if (!suppressEventClickRef.current) onSelectEvent(event); }} style={{ background: event.calendarId === WORKOUT_CALENDAR_ID ? "#203329" : mutedCalendarColor(event.color), cursor: editable ? "grab" : "pointer", touchAction: editable ? "none" : undefined }} title={event.summary ?? "Untitled event"}>
             {editable && isFirstDay && <span className="calendar-all-day-resize start" onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "start")} />}
             <span className="calendar-all-day-title"><CalendarItemTitle event={event} /></span>
             {editable && isLastDay && <span className="calendar-all-day-resize end" onPointerDown={(pointerEvent) => beginAllDayGesture(pointerEvent, event, "end")} />}
@@ -1328,7 +1361,7 @@ function TimeGrid({ view, days, events, calendars, onSelectEvent, onCreateEvent,
                 if (!segment) return null;
                 const isPast = hasEventPassed(event, now);
                 const editable = isEventWritable(event, calendars.find((calendar) => calendar.id === event.calendarId));
-                return <button type="button" className={`google-calendar-event${editable ? " editable" : ""}${eventPreview?.key === `${event.calendarId}-${event.id}` ? " dragging" : ""}`} key={`${event.calendarId}-${event.id}-${dateKey(day)}`} onClick={() => { if (!suppressEventClickRef.current) onSelectEvent(event); }} onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "move")} onPointerMove={updateEventGesture} onPointerUp={finishEventGesture} onPointerCancel={cancelEventGesture} style={{ top: segment.top, height: segment.height, background: mutedCalendarColor(event.color), filter: isPast ? "brightness(.72) saturate(.82)" : undefined, opacity: isPast ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
+                return <button type="button" data-workout={event.calendarId === WORKOUT_CALENDAR_ID || undefined} className={`google-calendar-event${editable ? " editable" : ""}${eventPreview?.key === `${event.calendarId}-${event.id}` ? " dragging" : ""}`} key={`${event.calendarId}-${event.id}-${dateKey(day)}`} onClick={() => { if (!suppressEventClickRef.current) onSelectEvent(event); }} onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "move")} onPointerMove={updateEventGesture} onPointerUp={finishEventGesture} onPointerCancel={cancelEventGesture} style={{ top: segment.top, height: segment.height, background: event.calendarId === WORKOUT_CALENDAR_ID ? "#203329" : mutedCalendarColor(event.color), filter: isPast && event.calendarId !== WORKOUT_CALENDAR_ID ? "brightness(.72) saturate(.82)" : undefined, opacity: isPast && event.calendarId !== WORKOUT_CALENDAR_ID ? 0.82 : 1 }} title={event.summary ?? "Untitled event"}>
                   {editable && segment.beginsHere && <span className="calendar-resize-handle top" onPointerDown={(pointerEvent) => beginEventGesture(pointerEvent, event, "start")} />}
                   <strong><CalendarItemTitle event={event} /></strong>
                   {segment.height >= 48 && <span className="calendar-event-time">{eventTimeRange({ ...event, start: { ...event.start, dateTime: segment.start.toISOString() }, end: { ...event.end, dateTime: segment.end.toISOString() } })}</span>}
@@ -1428,9 +1461,9 @@ function MonthView({ focusDate, events, calendars, onSelectEvent, onCreateEvent,
         return <div className={`calendar-month-cell ${day.getMonth() !== focusDate.getMonth() ? "muted" : ""}${draggedTask && taskHover?.id === draggedTask.id && taskHover.day === key ? " task-drop-target" : ""}`} key={key} onClick={() => onCreateEvent({ start: new Date(`${key}T00:00:00`), end: new Date(`${addIsoDateDays(key, 1)}T00:00:00`), allDay: true })} onDragOver={(dragEvent) => { if (draggedTask && dragEvent.dataTransfer.types.includes(TASK_DRAG_TYPE)) { dragEvent.preventDefault(); dragEvent.dataTransfer.dropEffect = "move"; setTaskHover({ id: draggedTask.id, day: key }); } else if (draggedEvent) dragEvent.preventDefault(); }} onDragLeave={(event) => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setTaskHover(null); }} onDrop={(dragEvent) => { dragEvent.preventDefault(); setTaskHover(null); if (draggedTask && dragEvent.dataTransfer.getData(TASK_DRAG_TYPE) === draggedTask.id) { onTaskDrop(draggedTask, day); } else dropEvent(); }}>
           <span className={key === today ? "today" : ""}>{day.getDate()}</span>
           {draggedTask && taskHover?.id === draggedTask.id && taskHover.day === key && <div className="calendar-month-task-preview"><strong>{draggedTask.title}</strong><span>Drop to choose time</span></div>}
-          {events.filter((event) => event.start && (event.start.date ? allDayEventOccursOn(event, day) : dateKey(new Date(event.start.dateTime!)) === key)).slice(0, 3).map((event) => {
+          {events.filter((event) => event.start && (event.start.date ? allDayEventOccursOn(event, day) : event.calendarId === WORKOUT_CALENDAR_ID ? new Date(event.start.dateTime!) < addDays(day, 1) && new Date(event.end!.dateTime!) > day : dateKey(new Date(event.start.dateTime!)) === key)).slice(0, 3).map((event) => {
             const editable = isEventWritable(event, calendars.find((calendar) => calendar.id === event.calendarId));
-return <button type="button" draggable={editable} className="google-calendar-month-event" key={`${event.calendarId}-${event.id}`} onClick={(clickEvent) => { clickEvent.stopPropagation(); onSelectEvent(event); }} onDragStart={(dragEvent) => { dragEvent.stopPropagation(); setDraggedEvent({ event, sourceDay: day }); }} onDragEnd={() => setDraggedEvent(null)} style={{ width: "100%", borderTop: 0, borderRight: 0, borderBottom: 0, borderLeftColor: event.color ?? "#4285f4", background: "transparent", cursor: editable ? "grab" : "pointer", textAlign: "left" }}><CalendarItemTitle event={event} /></button>;
+return <button type="button" draggable={editable} data-workout={event.calendarId === WORKOUT_CALENDAR_ID || undefined} className="google-calendar-month-event" key={`${event.calendarId}-${event.id}`} onClick={(clickEvent) => { clickEvent.stopPropagation(); onSelectEvent(event); }} onDragStart={(dragEvent) => { dragEvent.stopPropagation(); setDraggedEvent({ event, sourceDay: day }); }} onDragEnd={() => setDraggedEvent(null)} style={{ width: "100%", borderTop: 0, borderRight: 0, borderBottom: 0, borderLeftColor: event.color ?? "#4285f4", background: "transparent", cursor: editable ? "grab" : "pointer", textAlign: "left" }}><CalendarItemTitle event={event} showTime /></button>;
           })}
         </div>;
       })}

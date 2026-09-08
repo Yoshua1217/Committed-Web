@@ -2,6 +2,9 @@
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: start; }
 .mainColumn { min-width: 0; }
 .sidebar { display: grid; gap: 18px; min-width: 0; }
+.weightLogger { min-width: 0; }
+.weightLoggerSaved { order: 1; }
+.weightLogger > section { margin-bottom: 0; }
 .sidebar .section { margin: 0; }
 .sidebar .sectionHeader h2 { display: flex; align-items: center; gap: 7px; font-size: 15px; }
 .sidebar .sectionHeader small { font-size: 11px; }
@@ -11,6 +14,16 @@
 .sidebar .week { gap: 2px; }
 .sidebar .dayDot { width: 28px; height: 28px; }
 .sidebar .otherTotals { display: grid; gap: 7px; }
+.weekSummary { min-width: 0; }
+.weekSummary .sectionHeader h2 { display: flex; align-items: center; gap: 7px; font-size: 15px; }
+.weekSummary .sectionHeader small { font-size: 11px; }
+.weekSummary .stats { gap: 7px; }
+.weekSummary .stat strong { font-size: 21px; overflow-wrap: anywhere; }
+.weekSummary .stat + .stat { padding-left: 8px; }
+.weekSummary .week { gap: 2px; }
+.weekSummary .dayDot { width: 28px; height: 28px; }
+.weekSummary .otherTotals { display: grid; gap: 7px; }
+.standaloneWeekSummary { margin: 0; }
 .sideNote { margin: 0; color: var(--secondary); font-size: 12px; line-height: 1.6; }
 .recordList { display: grid; }
 .recordLink { display: grid; gap: 4px; width: 100%; padding: 12px 0; background: transparent; border: 0; color: var(--primary); font: inherit; text-align: left; cursor: pointer; font-size: 12px; }
@@ -53,6 +66,19 @@
 .empty { padding: 22px 16px; border: 1px dashed var(--border); border-radius: 16px; text-align: center; }
 .empty .actions { justify-content: center; }
 .restNote { margin: 0 0 16px; color: var(--secondary); font-size: 13px; line-height: 1.6; }
+.scheduleStrip { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.scheduleStrip button { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: 12px 15px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); color: var(--primary); text-align: left; cursor: pointer; }
+.scheduleStrip button[aria-pressed="true"] { border-color: #519868; background: #51986818; }
+.scheduleStrip button > span:first-child { color: #70b789; flex-shrink: 0; }
+.scheduleStrip strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+.scheduleStrip small { display: block; margin-top: 4px; font-size: 11px; color: var(--primary); opacity: .8; }
+.recap { padding: 20px; margin-bottom: 18px; border: 1px solid #51986866; border-radius: 18px; background: var(--surface); }
+.recap .eyebrow { color: #70b789; }
+.recap .sectionHeader h2 { overflow-wrap: anywhere; }
+.recap .stats { margin-top: 20px; }
+.recapExercises { display: grid; gap: 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+.recapExercises strong { font-size: 13px; color: var(--primary); overflow-wrap: anywhere; }
+.recapExercises p { font-size: 12px; color: var(--primary); opacity: .85; margin: 5px 0 0; line-height: 1.7; }
 .empty h3 { margin: 0 0 7px; font-size: 16px; font-weight: 750; }
 .empty p { margin: 0 0 16px; font-size: 13px; color: var(--secondary); line-height: 1.5; }
 .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

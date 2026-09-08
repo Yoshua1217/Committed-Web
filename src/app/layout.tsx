@@ -3,6 +3,7 @@ import "./globals.css";
 import "katex/dist/katex.min.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { ThemeProvider } from "@/lib/theme-context";
+import Reminders from "@/components/reminder-notifications";
 
 export const metadata: Metadata = {
   title: "Committed",
@@ -32,6 +33,7 @@ export default function RootLayout({
       <body className="app-shell">
         <ThemeProvider>
           <AuthProvider>
+            <Reminders />
             {children}
           </AuthProvider>
         </ThemeProvider>

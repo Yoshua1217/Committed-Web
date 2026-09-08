@@ -207,3 +207,10 @@ export async function saveCalendarFeatureMapping(
     featureCalendarMappings: { ...preferences.featureCalendarMappings, [feature]: calendarId },
   });
 }
+
+/** Only patch Home's mapping; preserve other feature mappings and layer order. */
+export async function saveHomeEventLayer(userId: string, calendarId: string | null): Promise<void> {
+  await setDoc(doc(db, SETTINGS_COLLECTION, userId), {
+    [PREFERENCES_FIELD]: { featureCalendarMappings: { homeEvents: calendarId } },
+  }, { merge: true });
+}

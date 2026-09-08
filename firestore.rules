@@ -208,6 +208,23 @@ service cloud.firestore {
     }
 
     // Settings use the Firebase Auth UID as the document ID.
+    match /weight_logs/{documentId} {
+      function validWeight() {
+        let data = request.resource.data;
+        return isOwner(data)
+          && data.keys().hasOnly(['id', 'userId', 'date', 'weightLbs', 'createdAt', 'updatedAt'])
+          && data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && documentId == data.userId + '_' + data.date && data.id == documentId
+          && data.weightLbs is number && data.weightLbs > 0 && data.weightLbs <= 2000
+          && data.createdAt is int && data.updatedAt is int;
+      }
+      allow get: if isSignedIn() && documentId.matches(request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}');
+      allow list, delete: if isOwner(resource.data);
+      allow create: if validWeight();
+      allow update: if isOwner(resource.data) && validWeight()
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
     match /userSettings/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }

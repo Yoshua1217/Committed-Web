@@ -1,0 +1,31 @@
+.editor, .fields { display: grid; gap: 14px; min-width: 0; }
+.fields { border: 0; padding: 0; margin: 0; }
+.label { display: grid; gap: 6px; color: var(--secondary); font-size: 12px; min-width: 0; }
+.label input, .label textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 11px; padding: 11px 12px; color: var(--primary); background: var(--background); font: inherit; font-size: 16px; color-scheme: dark; }
+.description { min-width: 0; color: var(--secondary); font-size: 13px; }
+.description summary { cursor: pointer; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; padding: 8px 0; }
+.description[open] summary { margin-bottom: 8px; }
+.scheduleRow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px; border: 1px solid var(--border); border-radius: 13px; background: var(--background); color: var(--primary); text-align: left; cursor: pointer; }
+.scheduleRow > span:nth-child(2) { min-width: 0; flex: 1; }
+.scheduleRow small { display: block; margin-bottom: 4px; color: var(--secondary); font-size: 11px; }
+.scheduleRow strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.sectionTitle, .exerciseHeader { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sectionTitle h3 { margin: 5px 0 0; font-size: 15px; }
+.sectionTitle > span, .hint { font-size: 12px; color: var(--secondary); line-height: 1.6; }
+.exercise { padding: 13px; background: var(--background); border: 1px solid var(--border); border-radius: 13px; }
+.exerciseHeader { margin-bottom: 10px; }
+.exerciseHeader strong { font-size: 14px; overflow-wrap: anywhere; }
+.exerciseHeader > div { display: flex; flex-shrink: 0; }
+.exerciseHeader button { display: grid; place-items: center; background: transparent; border: 0; color: var(--secondary); padding: 5px; cursor: pointer; }
+.numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.primary, .secondary { font: inherit; font-size: 13px; font-weight: 750; padding: 12px 19px; border-radius: 999px; cursor: pointer; }
+.primary { border: 0; background: #fff; color: #111; }
+.secondary { border: 1px solid var(--border); background: transparent; color: var(--primary); }
+.actions { display: flex; justify-content: flex-end; gap: 10px; }
+.days { display: flex; justify-content: space-between; gap: 5px; margin-bottom: 20px; }
+.days button { width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 50%; color: var(--secondary); background: var(--background); cursor: pointer; }
+.days button[aria-pressed="true"] { background: #4caf5020; border-color: #4caf50; color: #66bb7a; }
+.mode { display: flex; gap: 9px; align-items: center; font-size: 13px; margin: 16px 0; }
+.timeRows { display: grid; gap: 12px; margin-bottom: 16px; }
+.error { color: #e99491; font-size: 13px; }
+.editor button:disabled, .primary:disabled { opacity: .45; cursor: default; }

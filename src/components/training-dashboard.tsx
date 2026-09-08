@@ -1,16 +1,19 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
+import WorkoutRecap from "@/components/workout-recap";
+import { formatWorkoutTime, workoutTimeOn } from "@/lib/workout-schedule";
 import TodayWorkoutCard from "@/components/today-workout-card";
 import WorkoutRoutineSelect from "@/components/workout-routine-select";
 import TrainingSidebar from "@/components/training-sidebar";
 import MaterialIcon from "@/components/material-icon";
 import { TrainingHistoryCard, TrainingRoutineCard } from "@/components/training-cards";
-import { filterTrainingHistory, groupTrainingHistory, todayTraining, trainingPreview, type HistoryFilter, type TrainingSection } from "@/lib/training-dashboard";
+import { filterTrainingHistory, latestWorkoutRecap, groupTrainingHistory, todayTraining, trainingPreview, type HistoryFilter, type TrainingSection } from "@/lib/training-dashboard";
 import type { StretchRoutineDefinition, WorkoutDefinition, WorkoutSession } from "@/lib/types";
 import styles from "./training-dashboard.module.css";
 
 export interface TrainingDashboardProps {
+  userId?: string;
   workouts: WorkoutDefinition[]; routines: StretchRoutineDefinition[]; sessions: WorkoutSession[]; today: string;
   section: TrainingSection; onSection: (section: TrainingSection) => void;
   loading: { workouts: boolean; routines: boolean; history: boolean }; loadErrors: { workouts: boolean; routines: boolean; history: boolean; active?: boolean }; onRetry: () => void;
@@ -33,6 +36,8 @@ export default function TrainingDashboard(props: TrainingDashboardProps) {
   const tabs = ["train", "routines", "history"] as const;
   const overview = useMemo(() => todayTraining(workouts, sessions, today), [workouts, sessions, today]);
   const preview = useMemo(() => trainingPreview(workouts, sessions, today, previewId), [workouts, sessions, today, previewId]);
+  const selectedToday = overview.todayWorkouts.find(({ workout }) => workout.id === preview?.workout.id);
+  const recap = preview ? latestWorkoutRecap(sessions, preview.workout.id, today) : undefined;
   const history = useMemo(() => filterTrainingHistory(sessions, historyQuery, filter, prsOnly), [sessions, historyQuery, filter, prsOnly]);
   const groups = useMemo(() => groupTrainingHistory(history), [history]);
   const search = routineQuery.trim().toLowerCase();
@@ -64,11 +69,12 @@ export default function TrainingDashboard(props: TrainingDashboardProps) {
     <div role="tabpanel" id={`${id}-train-panel`} aria-labelledby={`${id}-train`} hidden={section !== "train"}>
       <section className={styles.section}>
         <div className={styles.sectionHeader}><h2>Today’s training</h2><small>{new Date(`${today}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</small></div>
-        {props.loadErrors.workouts ? <p className={styles.loading}>Workouts are unavailable. Try loading again.</p> : loading.workouts ? <p role="status" className={styles.loading}>Loading your workouts…</p> : overview.todayWorkouts.length ? <div className={styles.stack}>{overview.todayWorkouts.map(({ workout, completed }) => <TodayWorkoutCard key={workout.id} workout={workout} sessions={sessions} completed={completed} historyReady={!loading.history && !props.loadErrors.history} enabled={props.enabled} active={!!props.activeSession} onStart={props.onStartSaved} onPreview={() => props.onPreviewWorkout(workout)} />)}</div> : <>
+        {props.loadErrors.workouts ? <p className={styles.loading}>Workouts are unavailable. Try loading again.</p> : loading.workouts ? <p role="status" className={styles.loading}>Loading your workouts…</p> : <>
           {preview ? <>
-            <p className={styles.restNote}>No workout scheduled today. Get ready for your next session, or choose a routine below.</p>
-            <WorkoutRoutineSelect workouts={workouts.slice().sort((a, b) => a.sortOrder - b.sortOrder)} value={preview.workout.id} onChange={setPreviewId} />
-            <TodayWorkoutCard key={preview.workout.id} workout={preview.workout} sessions={sessions} completed={false} contextLabel={preview.label} historyReady={!loading.history && !props.loadErrors.history} enabled={props.enabled} active={!!props.activeSession} onStart={props.onStartSaved} onPreview={() => props.onPreviewWorkout(preview.workout)} />
+            {overview.todayWorkouts.length ? <div className={styles.scheduleStrip} aria-label="Scheduled today">{overview.todayWorkouts.map(({ workout, completed }) => <button type="button" key={workout.id} aria-pressed={preview.workout.id === workout.id} onClick={() => setPreviewId(workout.id)}><MaterialIcon name={completed ? "check_circle" : "calendar_today"} size={16} /><span><strong>{workout.name}</strong><small>{completed ? "Completed today" : "Scheduled today"} · {formatWorkoutTime(workoutTimeOn(workout, today))}</small></span></button>)}</div> : <p className={styles.restNote}>No workout scheduled today. Choose any saved workout to see your targets.</p>}
+            <WorkoutRoutineSelect workouts={workouts.slice().sort((a, b) => a.sortOrder - b.sortOrder)} value={preview.workout.id} onChange={setPreviewId} todayIds={overview.todayWorkouts.map(({ workout }) => workout.id)} />
+            {!loading.history && !props.loadErrors.history && recap && <WorkoutRecap session={recap} today={today} onOpen={() => props.onHistory(recap)} />}
+            <TodayWorkoutCard key={preview.workout.id} workout={preview.workout} sessions={sessions} completed={!!selectedToday?.completed} contextLabel={selectedToday ? "Scheduled today" : preview.label} historyReady={!loading.history && !props.loadErrors.history} enabled={props.enabled} active={!!props.activeSession} onStart={props.onStartSaved} onPreview={() => props.onPreviewWorkout(preview.workout)} />
           </> : <div className={styles.empty}><h3>Build your next session.</h3><p>Save a routine to see exercise targets and guidance here, or start a freestyle workout.</p><div className={styles.actions}><button type="button" className={styles.primary} disabled={!props.enabled} onClick={props.onCreate}>Create routine</button><button type="button" className={styles.secondary} disabled={!props.enabled} onClick={props.onStartWorkout}>{props.activeSession ? "Resume session" : "Start freestyle"}</button></div></div>}
         </>}
       </section>

@@ -20,7 +20,7 @@ import WorkoutCompletionSummary from "@/components/workout-completion-summary";
 import ScheduleCheckInModal from "@/components/schedule-checkin-modal";
 import { useAuth } from "@/lib/auth-context";
 import { ActivityDefinition, ActivityIntensity, ScheduledCheckIn, StretchRoutineDefinition, WorkoutDefinition, WorkoutSession } from "@/lib/types";
-import { completeActivitySession, completeWorkoutSession, completeWorkoutSessionWithPersonalRecords, createActivitySession, createStretchRoutineSession, createWorkoutSession, deleteCompletedSession, deleteWorkout, deleteWorkoutSession, saveStretchRoutine, saveWorkout, saveWorkoutSession, subscribeToActiveWorkoutSession, subscribeToCompletedWorkoutSessions, subscribeToStretchRoutines, subscribeToWorkouts } from "@/lib/workouts-service";
+import { completeActivitySession, completeWorkoutSession, completeWorkoutSessionWithPersonalRecords, createActivitySession, createStretchRoutineSession, createWorkoutSession, deleteCompletedSession, deleteStretchRoutine, deleteWorkout, deleteWorkoutSession, saveStretchRoutine, saveWorkout, saveWorkoutSession, subscribeToActiveWorkoutSession, subscribeToCompletedWorkoutSessions, subscribeToStretchRoutines, subscribeToWorkouts } from "@/lib/workouts-service";
 import { getSettings } from "@/lib/settings-service";
 import { markHabitComplete } from "@/lib/habits-service";
 import { scheduleStretchRoutineCheckIn, subscribeToScheduledCheckIns } from "@/lib/scheduled-checkins-service";
@@ -56,6 +56,19 @@ export default function WorkoutsPage() {
   const [scheduledCheckIns, setScheduledCheckIns] = useState<ScheduledCheckIn[]>([]);
   const [routineToSchedule, setRoutineToSchedule] = useState<StretchRoutineDefinition | null>(null);
   const today = useToday();
+  const openedHomeWorkout = useRef(false);
+  useEffect(() => {
+    if (loading || openedHomeWorkout.current) return;
+    const id = new URLSearchParams(window.location.search).get("workout");
+    if (!id) return;
+    const workout = workouts.find((item) => item.id === id);
+    if (!workout) return;
+    const frame = requestAnimationFrame(() => {
+      openedHomeWorkout.current = true;
+      setPreviewWorkout(workout);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [loading, workouts]);
   const historySession = completedSessions.find((session) => session.id === selectedHistorySession?.id) ?? selectedHistorySession;
 
   useEffect(() => {
@@ -224,7 +237,7 @@ export default function WorkoutsPage() {
 
   return (
     <div className="workouts-page" style={{ padding: "32px 28px", width: "100%", minWidth: 0 }}>
-      <TrainingDashboard workouts={workouts} routines={stretchRoutines} sessions={completedSessions} today={today}
+      <TrainingDashboard userId={user?.uid} workouts={workouts} routines={stretchRoutines} sessions={completedSessions} today={today}
         section={section} onSection={setSection} loading={{ workouts: loading, routines: routinesLoading, history: historyLoading }}
         loadErrors={{ ...loadErrors, active: activeSessionError }} onRetry={() => { setLoading(true); setRoutinesLoading(true); setHistoryLoading(true); setLoadErrors({ workouts: false, routines: false, history: false }); setRetry((value) => value + 1); }}
         enabled={!!user && activeSessionReady} activeSession={activeSession} onStart={() => openStart()} onStartWorkout={() => openStart("workout")}
@@ -236,7 +249,7 @@ export default function WorkoutsPage() {
       {createWorkoutOpen && <CreateWorkoutModal isOpen userId={user?.uid ?? ""} nextSortOrder={workouts.length} onClose={() => setCreateWorkoutOpen(false)} onCreate={saveWorkout} />}
       {createStretchOpen && <CreateStretchRoutineModal isOpen userId={user?.uid ?? ""} nextSortOrder={stretchRoutines.length} onClose={() => setCreateStretchOpen(false)} onCreate={createStretchRoutine} />}
       {previewWorkout && <WorkoutPreviewModal workout={previewWorkout} onExit={() => setPreviewWorkout(null)} onStart={(workout) => void startWorkout(workout)} onSave={async (workout) => { await saveWorkout(workout); setPreviewWorkout(workout); }} onDelete={async (workout) => { await deleteWorkout(workout.id); setPreviewWorkout(null); }} />}
-      {previewStretchRoutine && <StretchRoutinePreviewModal routine={previewStretchRoutine} onClose={() => setPreviewStretchRoutine(null)} onStart={(routine) => void startStretchRoutine(routine)} onScheduleCheckIn={() => setRoutineToSchedule(previewStretchRoutine)} pendingCheckInAt={pendingCheckInForRoutine(previewStretchRoutine.id)?.dueAt ?? null} />}
+      {previewStretchRoutine && <StretchRoutinePreviewModal routine={previewStretchRoutine} onClose={() => setPreviewStretchRoutine(null)} onStart={(routine) => void startStretchRoutine(routine)} onSave={async (routine) => { await saveStretchRoutine(routine); setPreviewStretchRoutine(routine); }} onDelete={async (routine) => { await deleteStretchRoutine(routine.id); setPreviewStretchRoutine(null); }} onScheduleCheckIn={() => setRoutineToSchedule(previewStretchRoutine)} pendingCheckInAt={pendingCheckInForRoutine(previewStretchRoutine.id)?.dueAt ?? null} />}
       {routineToSchedule && <ScheduleCheckInModal title={routineToSchedule.name} detail="Keep this routine pending and we’ll ask whether you completed it the next time you open the dashboard after your chosen time." onClose={() => setRoutineToSchedule(null)} onSchedule={async (time) => { await scheduleStretchRoutineCheckIn(routineToSchedule, time); }} />}
       {activeSession?.sessionType === "activity" ? <ActiveActivityScreen key={activeSession.id} onChange={saveWorkoutSession} session={activeSession} onFinish={finishActivity} onAbandon={abandonWorkout} /> : activeSession?.sessionType === "stretch" ? <ActiveStretchRoutineScreen key={activeSession.id} onChange={saveWorkoutSession} session={activeSession} onFinish={finishStretchRoutine} onAbandon={abandonWorkout} /> : activeSession && <ActiveWorkoutScreen key={activeSession.id} history={historyLoading || loadErrors.history ? undefined : completedSessions} session={activeSession} onChange={saveWorkoutSession} onFinish={finishWorkout} onAbandon={abandonWorkout} />}
       {completionSession && <WorkoutCompletionSummary session={completionSession} onDone={() => setCompletionSession(null)} onViewHistory={() => { setSection("history"); setHistorySession(completionSession); setCompletionSession(null); }} />}

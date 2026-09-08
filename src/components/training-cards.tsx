@@ -1,3 +1,4 @@
+import { workoutScheduleSummary } from "@/lib/workout-schedule";
 import MaterialIcon from "@/components/material-icon";
 import { sessionDay, sessionSeconds, trainingDateLabel, trainingDuration, trainingDays } from "@/lib/training-dashboard";
 import type { WorkoutDefinition, StretchRoutineDefinition, WorkoutSession } from "@/lib/types";
@@ -9,7 +10,7 @@ export function TrainingRoutineCard({ workout, stretch, last, completed, onPrevi
 }) {
   const routine = workout ?? stretch!;
   const count = workout ? workout.exercises.length : stretch!.stretches.length;
-  const days = routine.scheduledDays.slice().sort((a, b) => a - b).map((day) => trainingDays[day].slice(0, 3)).join(" · ");
+  const days = workout ? workoutScheduleSummary(workout) : routine.scheduledDays.slice().sort((a, b) => a - b).map((day) => trainingDays[day].slice(0, 3)).join(" · ");
   return <article className={styles.card}>
     <div className={styles.cardBody}>
       {completed !== undefined && <p className={`${styles.eyebrow} ${completed ? styles.complete : ""}`}>{completed ? <><MaterialIcon name="check_circle" size={14} />Completed today</> : "Scheduled today"}</p>}

@@ -9,6 +9,7 @@ import {
   subscribeToHabits,
   subscribeToCompletionsForDate,
   saveHabit,
+  createHabit,
   deleteHabit,
   getCompletionsForDate,
   editHabitCompletion,
@@ -1385,7 +1386,7 @@ export default function ManageHabitsPage() {
       <HabitEditModal
         isOpen={modalOpen}
         onClose={() => { setModalOpen(false); setEditingHabit(null); }}
-        onSave={handleSave}
+        onSave={editingHabit ? handleSave : createHabit}
         onDelete={handleDelete}
         habit={editingHabit}
         goals={goals}

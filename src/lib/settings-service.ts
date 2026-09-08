@@ -14,6 +14,9 @@ const DEFAULT_SETTINGS: UserSettings = {
   workoutHabitMappingHabitId: null,
   stretchHabitMappingEnabled: false,
   stretchHabitMappingHabitId: null,
+  weightHabitMappingEnabled: false,
+  weightHabitMappingHabitId: null,
+  weightHabitMappingConfigured: false,
 };
 
 function settingsFromFirestore(data: Record<string, unknown>): UserSettings {
@@ -27,6 +30,9 @@ function settingsFromFirestore(data: Record<string, unknown>): UserSettings {
     workoutHabitMappingHabitId: typeof data.workoutHabitMappingHabitId === "string" ? data.workoutHabitMappingHabitId : null,
     stretchHabitMappingEnabled: data.stretchHabitMappingEnabled === true,
     stretchHabitMappingHabitId: typeof data.stretchHabitMappingHabitId === "string" ? data.stretchHabitMappingHabitId : null,
+    weightHabitMappingEnabled: data.weightHabitMappingEnabled === true,
+    weightHabitMappingHabitId: typeof data.weightHabitMappingHabitId === "string" ? data.weightHabitMappingHabitId : null,
+    weightHabitMappingConfigured: data.weightHabitMappingConfigured === true,
   };
 }
 
@@ -62,6 +68,9 @@ export async function saveSettings(userId: string, settings: UserSettings): Prom
     workoutHabitMappingHabitId: settings.workoutHabitMappingHabitId,
     stretchHabitMappingEnabled: settings.stretchHabitMappingEnabled,
     stretchHabitMappingHabitId: settings.stretchHabitMappingHabitId,
+    weightHabitMappingEnabled: settings.weightHabitMappingEnabled,
+    weightHabitMappingHabitId: settings.weightHabitMappingHabitId,
+    weightHabitMappingConfigured: settings.weightHabitMappingConfigured,
   }, { merge: true });
 }
 
@@ -71,4 +80,13 @@ export async function getSettings(userId: string): Promise<UserSettings> {
   return snapshot.exists()
     ? settingsFromFirestore(snapshot.data() as Record<string, unknown>)
     : DEFAULT_SETTINGS;
+}
+
+/** Change just this mapping so choosing from Train preserves other settings. */
+export async function saveWeightHabitMapping(userId: string, habitId: string | null): Promise<void> {
+  await setDoc(doc(db, COLLECTION_NAME, userId), {
+    weightHabitMappingEnabled: habitId !== null,
+    weightHabitMappingHabitId: habitId,
+    weightHabitMappingConfigured: true,
+  }, { merge: true });
 }

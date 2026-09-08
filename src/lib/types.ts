@@ -144,6 +144,9 @@ export interface UserSettings {
   workoutHabitMappingHabitId: string | null;
   stretchHabitMappingEnabled: boolean;
   stretchHabitMappingHabitId: string | null;
+  weightHabitMappingEnabled: boolean;
+  weightHabitMappingHabitId: string | null;
+  weightHabitMappingConfigured: boolean;
 }
 
 export type MuscleGroup = "Chest" | "Back" | "Shoulders" | "Biceps" | "Triceps" | "Forearms" | "Core" | "Quadriceps" | "Hamstrings" | "Glutes" | "Calves" | "Full body";
@@ -169,6 +172,8 @@ export interface WorkoutExercisePlan {
   sortOrder: number;
   plannedSets: number;
   plannedReps: number;
+  /** Optional upper rep target, specific to this routine or session. */
+  plannedRepsMax?: number;
 }
 
 export interface WorkoutDefinition {
@@ -177,6 +182,8 @@ export interface WorkoutDefinition {
   name: string;
   description: string;
   scheduledDays: WorkoutDay[];
+  scheduledStartTimes?: Partial<Record<WorkoutDay, string>>;
+  scheduledTimeOverrides?: Record<string, string>;
   exercises: WorkoutExercisePlan[];
   sortOrder: number;
   createdAt: number;
@@ -263,6 +270,8 @@ export interface ExerciseCoachingBaseline {
   completedAt: number;
   loadType: ExerciseLoadType;
   plannedReps: number;
+  /** Optional upper rep target, specific to this routine or session. */
+  plannedRepsMax?: number;
   effort: ExerciseEffort | null;
   sets: WorkoutSetLog[];
 }
@@ -280,6 +289,8 @@ export interface WorkoutExerciseLog {
   sortOrder: number;
   plannedSets: number;
   plannedReps: number;
+  /** Optional upper rep target, specific to this routine or session. */
+  plannedRepsMax?: number;
   /** Added while logging, without changing the saved routine. */
   addedDuringSession?: boolean;
   sets: WorkoutSetLog[];

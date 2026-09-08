@@ -22,6 +22,7 @@ const USER_DATA_COLLECTIONS = [
   "ideas",
   "note_folders",
   "notes",
+  "weight_logs",
 ] as const;
 
 const LOCAL_STORAGE_KEYS = [

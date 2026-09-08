@@ -5,7 +5,6 @@ import { getProgressColor } from "@/lib/progress-color";
 interface ProgressCardProps {
   totalScheduled: number;
   progressValue: number;
-  completedNames: string[];
 }
 
 const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -14,7 +13,6 @@ const monthNames = ["January", "February", "March", "April", "May", "June", "Jul
 export default function ProgressCard({
   totalScheduled,
   progressValue,
-  completedNames,
 }: ProgressCardProps) {
   const now = new Date();
   const dayName = dayNames[now.getDay()];
@@ -32,7 +30,7 @@ export default function ProgressCard({
         }}
       >
         <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today&apos;s habits</span>
           <span style={{ fontSize: 13, color: "var(--secondary)" }}>{dateStr}</span>
         </div>
         <p style={{ fontSize: 13, color: "var(--secondary)", margin: 0, marginTop: 8 }}>
@@ -59,7 +57,7 @@ export default function ProgressCard({
     >
       {/* Date header */}
       <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
-        <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: "var(--primary)" }}>Today&apos;s habits</span>
         <span style={{ fontSize: 13, color: "var(--secondary)" }}>{dateStr}</span>
       </div>
 
@@ -118,30 +116,6 @@ export default function ProgressCard({
         )}
       </div>
 
-      {/* Completed names */}
-      {completedNames.length > 0 ? (
-        <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {completedNames.map((name) => (
-            <span
-              key={name}
-              style={{
-                fontSize: 12,
-                fontWeight: 500,
-                color: "#4CAF50",
-                backgroundColor: "#4CAF5015",
-                padding: "4px 10px",
-                borderRadius: 8,
-              }}
-            >
-              ✓ {name}
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p style={{ fontSize: 13, color: "var(--secondary)", marginTop: 14, marginBottom: 0 }}>
-          No habits completed yet
-        </p>
-      )}
     </div>
   );
 }

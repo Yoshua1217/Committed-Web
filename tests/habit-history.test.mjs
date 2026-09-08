@@ -133,7 +133,7 @@ test("service transaction preserves persisted history and serializes legacy defa
 
 test("service creates a local start date, soft-deletes, and hides deleted habits only in active lists", async () => {
   const h = harness([base()]);
-  await h.service.saveHabit(base({ id: "new" }));
+  await h.service.createHabit(base({ id: "new" }));
   assert.equal(h.records.get("habits/new").createdOn, history.localDateString());
   await h.service.deleteHabit("habit-a");
   assert.ok(h.records.has("habits/habit-a"));

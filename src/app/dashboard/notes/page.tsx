@@ -554,12 +554,17 @@ export default function NotesPage() {
 
   useEffect(() => {
     if (!user || !foldersLoaded || !notesLoaded || !notes.length || restoredLastNoteForUserRef.current === user.uid) return;
-    const savedNoteId = window.localStorage.getItem(`${NOTES_LAST_OPENED_KEY_PREFIX}${user.uid}`);
+    const params = new URLSearchParams(window.location.search);
+    const savedNoteId = params.get("note") ?? window.localStorage.getItem(`${NOTES_LAST_OPENED_KEY_PREFIX}${user.uid}`);
     const noteToRestore = notes.find((note) => note.id === savedNoteId) ?? notes[0];
     const frame = window.requestAnimationFrame(() => {
       restoredLastNoteForUserRef.current = user.uid;
       setSelectedNoteId(noteToRestore.id);
       setSelectedFolderId(noteToRestore.folderId);
+      if (params.get("edit") === "1") {
+        setEditorMode("write");
+        requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".notes-title-input")?.select());
+      }
       setExpandedIds((current) => {
         const next = new Set(current);
         let parent = folderMap.get(noteToRestore.folderId);

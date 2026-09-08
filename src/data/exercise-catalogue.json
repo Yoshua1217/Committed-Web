@@ -45,6 +45,21 @@
     "restSeconds": 150
   },
   {
+    "id": "machine-incline-press",
+    "name": "Machine Incline Press",
+    "loadType": "external_weight",
+    "primaryMuscleGroups": [
+      "Chest"
+    ],
+    "secondaryMuscleGroups": [
+      "Shoulders",
+      "Triceps"
+    ],
+    "summary": "Builds chest size with an upper-chest emphasis and high stability, making it easier to train the pressing muscles close to fatigue.",
+    "instructions": "Adjust the seat so the handles begin around upper-chest level and keep your back firmly against the pad. Press the handles forward and slightly upward through the machine's natural path until your arms are nearly straight, then return slowly until you feel a comfortable stretch across your chest. Keep your shoulders controlled rather than allowing them to roll forward.",
+    "restSeconds": 150
+  },
+  {
     "id": "cable-fly",
     "name": "Cable Fly",
     "loadType": "external_weight",
