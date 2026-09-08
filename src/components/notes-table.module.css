@@ -1,0 +1,41 @@
+.wrapper { position: relative; margin: 24px 0; padding-top: 32px; min-width: 0; }
+.scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 9px; }
+.scroll table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.scroll th, .scroll td { min-width: 110px; padding: 0; border: 1px solid var(--border); vertical-align: top; }
+.scroll th { background: var(--surface-variant); font-weight: 700; }
+.scroll td { background: var(--surface); }
+.cellContent, .scroll textarea { display: block; width: 100%; min-height: 40px; padding: 9px 12px; border: 0; background: transparent; color: inherit; font: inherit; line-height: 1.5; text-align: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+button.cellContent { cursor: text; }
+.scroll textarea { min-width: 110px; resize: vertical; outline: 2px solid var(--notes-accent, #9b8afb); outline-offset: -2px; }
+.selected { box-shadow: inset 0 0 0 1px var(--notes-accent, #9b8afb); }
+.controls { position: absolute; z-index: 5; right: 0; top: 0; font-size: 13px; line-height: 1.4; }
+.controls summary { width: 34px; height: 28px; margin-left: auto; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--primary); font-size: 22px; font-weight: 800; line-height: 1; cursor: pointer; list-style: none; opacity: 0; }
+.controls summary::-webkit-details-marker { display: none; }
+.wrapper:hover summary, .wrapper:focus-within summary, .controls[open] summary { opacity: 1; }
+.menu { width: 225px; max-width: calc(100vw - 65px); max-height: 340px; overflow-y: auto; margin-top: 4px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--primary); box-shadow: 0 15px 40px #0004; }
+.menu small { display: block; padding: 8px; color: var(--secondary); }
+.menu button { display: block; width: 100%; padding: 9px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.menu button:hover { background: var(--surface-variant); }
+.menu button:disabled { opacity: .4; cursor: default; }
+.menu .danger { color: var(--error, #e45d65); border-top: 1px solid var(--border); border-radius: 0; }
+.menu label { display: grid; gap: 6px; padding: 8px; }
+.menu select { padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--primary); }
+.picker { position: fixed; inset: 0; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 22px; overflow-y: auto; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); color: var(--primary); box-shadow: 0 24px 80px #0005; }
+.picker::backdrop { background: #0008; backdrop-filter: blur(4px); }
+.picker header { display: flex; justify-content: space-between; align-items: center; }
+.picker h2 { margin: 0; font-size: 20px; font-weight: 700; }
+.picker header button { border: 0; background: transparent; color: var(--secondary); font-size: 26px; cursor: pointer; }
+.picker p { margin: 6px 0 16px; color: var(--secondary); font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; }
+.grid button { min-width: 0; min-height: 0; padding: 0; aspect-ratio: 1; border: 1px solid var(--border); border-radius: 4px; background: var(--background); cursor: pointer; }
+.grid .highlight { border-color: var(--notes-accent, #9b8afb); background: color-mix(in srgb, var(--notes-accent, #9b8afb) 30%, var(--surface)); }
+.picker output { display: block; margin: 12px 0; font-size: 13px; text-align: center; }
+.dimensions { display: flex; gap: 12px; }
+.dimensions label { display: grid; flex: 1; min-width: 0; gap: 5px; font-size: 12px; }
+.dimensions input { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--primary); font-size: 16px; }
+.picker small { display: block; margin: 12px 0; color: var(--secondary); font-size: 11px; line-height: 1.5; }
+.picker footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.picker footer button { padding: 9px 14px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer; }
+.picker footer button:last-child { background: var(--primary); color: var(--surface); }
+.picker button:focus-visible, .controls summary:focus-visible, .menu button:focus-visible { outline: 2px solid var(--notes-accent, #9b8afb); outline-offset: 2px; }
+@media (hover: none), (pointer: coarse) { .controls summary { opacity: 1; } .menu button { min-height: 44px; } }

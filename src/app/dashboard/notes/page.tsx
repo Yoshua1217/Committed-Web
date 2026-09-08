@@ -34,6 +34,9 @@ import {
 import { deleteNoteImages, uploadNoteImage } from "@/lib/note-image-service";
 import NotesMarkdown, { collectMarkdownHeadings } from "@/components/notes-markdown";
 import NotesFastScroll from "@/components/notes-fast-scroll";
+import { TableSizePicker } from "@/components/notes-table";
+import { createTable, tableInsertion } from "@/lib/notes-tables";
+import { NotesHistory, listenForNoteHistory } from "@/lib/notes-history";
 
 type EditorMode = "write" | "preview";
 type MenuAnchor = { left: number; top: number };
@@ -56,9 +59,11 @@ interface SlashCommandBase {
 type SlashCommand = SlashCommandBase & (
   | { kind: "insert"; value: string; placeholder?: string }
   | { kind: "image" }
+  | { kind: "table" }
 );
 
 const SLASH_COMMANDS: SlashCommand[] = [
+  { id: "table", kind: "table", label: "Table", detail: "Choose rows and columns", icon: "table", keywords: "grid cells rows columns" },
   { id: "heading1", kind: "insert", value: "# Heading 1", placeholder: "Heading 1", label: "Heading 1", detail: "Large section heading", icon: "format_h1", keywords: "h1 title" },
   { id: "heading2", kind: "insert", value: "## Heading 2", placeholder: "Heading 2", label: "Heading 2", detail: "Medium section heading", icon: "format_h2", keywords: "h2 subtitle" },
   { id: "heading3", kind: "insert", value: "### Heading 3", placeholder: "Heading 3", label: "Heading 3", detail: "Small section heading", icon: "format_h3", keywords: "h3 subtitle" },
@@ -80,10 +85,22 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { id: "chem", kind: "insert", value: "$\\ce{H2O}$", placeholder: "H2O", label: "Chemistry formula", detail: "Format a chemical equation", icon: "science", keywords: "chem molecule equation mhchem" },
   { id: "fraction", kind: "insert", value: "$\\frac{numerator}{denominator}$", placeholder: "numerator", label: "Math fraction", detail: "Insert a stacked fraction", icon: "function", keywords: "math latex divide numerator denominator" },
   { id: "exponent", kind: "insert", value: "$base^{exponent}$", placeholder: "base", label: "Exponent", detail: "Type a base, then its exponent", icon: "superscript", keywords: "math power superscript squared cubed" },
+  { id: "root", kind: "insert", value: "$\\sqrt{value}$", placeholder: "value", label: "Square root", detail: "Insert a square root", icon: "function", keywords: "math sqrt radical" },
+  { id: "pi", kind: "insert", value: "π", label: "Pi", detail: "Insert π", icon: "function", keywords: "math symbol" },
+  { id: "degrees", kind: "insert", value: "°", label: "Degrees", detail: "Insert the degree symbol °", icon: "function", keywords: "degree angle temperature symbol" },
+  { id: "dot", kind: "insert", value: "·", label: "Multiplication dot", detail: "Insert · for multiplication", icon: "function", keywords: "math multiply times product symbol" },
   { id: "image", kind: "image", label: "Image", detail: "Upload one or more images", icon: "add_photo_alternate", keywords: "photo picture upload paste" },
 ];
 
 const FORMATTING_GUIDE = [
+  {
+    id: "tables",
+    title: "Tables",
+    icon: "table",
+    description: "Organize notes in a grid with editable cells and a header row.",
+    steps: "Type /table and press Enter. Choose columns and rows, then insert. Click cells in the formatted view to edit; use the ··· menu to add or remove rows and columns, align a column, or delete the table.",
+    syntax: "| Topic | Notes |\n| --- | --- |\n| Example | Add details here |",
+  },
   {
     id: "chemistry",
     title: "Chemistry formulas",
@@ -105,8 +122,8 @@ const FORMATTING_GUIDE = [
     title: "Fractions and inline math",
     icon: "function",
     description: "Use LaTeX between dollar signs for clean inline equations and stacked fractions.",
-    steps: "Type /fraction, replace numerator, then replace denominator.",
-    syntax: "$\\frac{1}{2}$",
+    steps: "Type /fraction, replace numerator, then replace denominator. To use a root in either part, select its placeholder, type /root, press Enter, and replace value.",
+    syntax: "$\\frac{1}{2}$\n\n$\\frac{\\sqrt{9}}{\\sqrt{16}}$",
   },
   {
     id: "exponents",
@@ -115,6 +132,22 @@ const FORMATTING_GUIDE = [
     description: "Raise a number or symbol to a power with a clean superscript, including negative exponents.",
     steps: "Type /exponent, enter the base, press Tab, then enter the exponent. Numeric forms such as 10^-2 also convert when you press Space.",
     syntax: "$10^{-2}$",
+  },
+  {
+    id: "roots",
+    title: "Square roots and other roots",
+    icon: "function",
+    description: "Format a square root with a radical covering the number or expression. Add an index for cube roots or other roots.",
+    steps: "Type /root, press Enter, then replace the selected value. This also works inside a fraction's numerator or denominator. For a cube root, use \\sqrt[3]{value} inside dollar signs.",
+    syntax: "$\\sqrt{25}$\n\n$\\sqrt[3]{8}$",
+  },
+  {
+    id: "symbols",
+    title: "Pi, degrees, and multiplication",
+    icon: "function",
+    description: "Insert π, °, and · directly into your notes for equations, angles, temperatures, and multiplication.",
+    steps: "Type /pi for π, /degrees for °, or /dot for ·, then press Enter or tap the result.",
+    syntax: "Circumference = 2 · π · r\n\nAngle = 90°\n\n3 · 4 = 12",
   },
   {
     id: "arrows",
@@ -139,13 +172,18 @@ const FORMATTING_GUIDE = [
     icon: "keyboard_command_key",
     description: "Open formatting and media tools without leaving the keyboard.",
     steps: "Start a line with /, type part of a command name, then press Enter or tap the result.",
-    syntax: "/subscript\n/chem\n/fraction\n/exponent\n/image",
+    syntax: "/subscript\n/chem\n/fraction\n/exponent\n/root\n/pi\n/degrees\n/dot\n/image\n/table",
     commands: [
       ["/subscript", "Insert lowered text"],
       ["/chem", "Insert a chemical formula"],
       ["/fraction", "Insert a stacked fraction"],
       ["/exponent", "Insert a base and exponent"],
+      ["/root", "Insert a square root"],
+      ["/pi", "Insert π"],
+      ["/degrees", "Insert °"],
+      ["/dot", "Insert · for multiplication"],
       ["/image", "Open the image picker"],
+      ["/table", "Choose a table size"],
     ],
   },
 ] as const;
@@ -190,6 +228,11 @@ const SHORTCUT_GROUPS = [
       ["[text](url)", "Link"],
       ["<sub>2</sub>", "Subscript"],
       ["$\\frac{1}{2}$", "Inline fraction"],
+      ["/root", "Insert a square root"],
+      ["$\\sqrt[3]{8}$", "Cube root (change 3 for other roots)"],
+      ["/pi", "Insert π"],
+      ["/degrees", "Insert °"],
+      ["/dot", "Insert · for multiplication"],
       ["$10^{-2}$", "Exponent or power"],
       ["10^-2 + Space", "Automatically format a numeric exponent"],
       ["$\\ce{H2O}$", "Chemistry formula"],
@@ -315,6 +358,7 @@ export default function NotesPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [calendars, setCalendars] = useState<SyncedGoogleCalendar[]>([]);
   const [slashRange, setSlashRange] = useState<{ start: number; end: number; query: string } | null>(null);
+  const [tableRange, setTableRange] = useState<{ start: number; end: number; noteId: string } | null>(null);
   const [linkRange, setLinkRange] = useState<{ start: number; end: number; query: string } | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<MenuAnchor>({ left: 320, top: 280 });
   const [menuIndex, setMenuIndex] = useState(0);
@@ -333,6 +377,7 @@ export default function NotesPage() {
   const locallyDirtyNoteIdsRef = useRef<Set<string>>(new Set());
   const lastFolderLabelClickRef = useRef<{ folderId: string; timestamp: number } | null>(null);
   const notesRef = useRef<MarkdownNote[]>([]);
+  const contentHistoryRef = useRef(new NotesHistory());
   const uploadNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sidebarPreferencesLoadedRef = useRef(false);
   const editorModePreferenceLoadedRef = useRef(false);
@@ -609,13 +654,27 @@ export default function NotesPage() {
     saveTimersRef.current.set(note.id, timer);
   }, []);
 
-  const updateActiveNote = useCallback((patch: Partial<MarkdownNote>) => {
+  const updateActiveNote = useCallback((patch: Partial<MarkdownNote>, historyGroup: string | null = null, replay = false) => {
     if (!activeNote) return;
-    const nextNote = { ...activeNote, ...patch, updatedAt: actionTimestamp() };
+    const currentNote = notesRef.current.find((note) => note.id === activeNote.id) ?? activeNote;
+    if (patch.content !== undefined && !replay) contentHistoryRef.current.record(`${currentNote.userId}:${currentNote.id}`, currentNote.content, patch.content, historyGroup);
+    const nextNote = { ...currentNote, ...patch, updatedAt: actionTimestamp() };
     notesRef.current = notesRef.current.map((note) => note.id === nextNote.id ? nextNote : note);
     setNotes((current) => current.map((note) => note.id === nextNote.id ? nextNote : note));
     scheduleSave(nextNote);
   }, [activeNote, scheduleSave]);
+
+  useEffect(() => {
+    if (!activeNote || searchOpen || settingsOpen || tableRange || notePendingDelete) return;
+    return listenForNoteHistory(documentScrollRef.current, (direction) => {
+      const current = notesRef.current.find((note) => note.id === activeNote.id) ?? activeNote;
+      const content = contentHistoryRef.current.step(`${current.userId}:${current.id}`, current.content, direction);
+      if (content === null) return;
+      updateActiveNote({ content }, null, true);
+      setSlashRange(null);
+      setLinkRange(null);
+    });
+  }, [activeNote, notePendingDelete, searchOpen, settingsOpen, tableRange, updateActiveNote]);
 
   const selectNote = (note: MarkdownNote) => {
     setSelectedNoteId(note.id);
@@ -831,7 +890,9 @@ export default function NotesPage() {
 
   const replaceUploadToken = useCallback((noteId: string, token: string, replacement: string) => {
     const note = notesRef.current.find((item) => item.id === noteId);
-    if (!note || !note.content.includes(token)) return;
+    if (!note) return;
+    contentHistoryRef.current.resolveText(`${note.userId}:${note.id}`, token, replacement);
+    if (!note.content.includes(token)) return;
     const next = { ...note, content: note.content.replace(token, replacement), updatedAt: actionTimestamp() };
     notesRef.current = notesRef.current.map((item) => item.id === noteId ? next : item);
     setNotes(notesRef.current);
@@ -917,7 +978,9 @@ export default function NotesPage() {
 
   const filteredCommands = useMemo(() => {
     const query = slashRange?.query.toLocaleLowerCase() ?? "";
-    return SLASH_COMMANDS.filter((command) => `${command.label} ${command.keywords}`.toLocaleLowerCase().includes(query));
+    return SLASH_COMMANDS
+      .filter((command) => `${command.id} ${command.label} ${command.keywords}`.toLocaleLowerCase().includes(query))
+      .sort((a, b) => Number(b.id === query) - Number(a.id === query));
   }, [slashRange]);
 
   const linkResults = useMemo(() => notes
@@ -926,14 +989,30 @@ export default function NotesPage() {
 
   const executeSlashCommand = (command: SlashCommand | undefined) => {
     if (!command || !slashRange) return;
+    if (command.kind === "table") {
+      if (activeNote) setTableRange({ start: slashRange.start, end: slashRange.end, noteId: activeNote.id });
+      setSlashRange(null);
+      setLinkRange(null);
+      return;
+    }
     if (command.kind === "image") {
       replaceEditorRange(slashRange.start, slashRange.end, "", 0);
       window.setTimeout(() => imageInputRef.current?.click(), 0);
       return;
     }
-    const placeholderStart = command.placeholder ? command.value.indexOf(command.placeholder) : command.value.length;
-    const selectionStart = placeholderStart >= 0 ? placeholderStart : command.value.length;
-    replaceEditorRange(slashRange.start, slashRange.end, command.value, selectionStart, selectionStart + (command.placeholder?.length ?? 0));
+    const content = activeNote?.content ?? "";
+    const lineStart = content.lastIndexOf("\n", slashRange.start - 1) + 1;
+    const prefix = content.slice(lineStart, slashRange.start);
+    const insideMath = hasOddUnescapedMarker(prefix, "$")
+      && !hasOddUnescapedMarker(prefix, "`")
+      && !isInsideFencedCode(content, slashRange.start);
+    // Nested expressions share the surrounding formula's dollar delimiters.
+    const value = insideMath && command.value.startsWith("$") && command.value.endsWith("$")
+      ? command.value.slice(1, -1)
+      : command.value;
+    const placeholderStart = command.placeholder ? value.indexOf(command.placeholder) : value.length;
+    const selectionStart = placeholderStart >= 0 ? placeholderStart : value.length;
+    replaceEditorRange(slashRange.start, slashRange.end, value, selectionStart, selectionStart + (command.placeholder?.length ?? 0));
   };
 
   const selectInternalLink = (note: MarkdownNote) => {
@@ -949,10 +1028,15 @@ export default function NotesPage() {
   const handleEditorChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const value = event.target.value;
     const cursor = event.target.selectionStart;
-    updateActiveNote({ content: value });
+    updateActiveNote({ content: value }, "source");
     const lineStart = value.lastIndexOf("\n", cursor - 1) + 1;
     const beforeCursor = value.slice(lineStart, cursor);
-    const slashMatch = beforeCursor.match(/(^|\s)\/([a-zA-Z0-9]*)$/);
+    const insideMath = hasOddUnescapedMarker(beforeCursor, "$")
+      && !hasOddUnescapedMarker(beforeCursor, "`")
+      && !isInsideFencedCode(value, cursor);
+    const slashMatch = beforeCursor.match(insideMath
+      ? /()\/([a-zA-Z0-9]*)$/
+      : /(^|\s)\/([a-zA-Z0-9]*)$/);
     const linkMatch = beforeCursor.match(/\[\[([^\]]*)$/);
     if (slashMatch) {
       const commandStart = lineStart + (slashMatch.index ?? 0) + slashMatch[1].length;
@@ -1320,12 +1404,12 @@ export default function NotesPage() {
               {formattedPreviewOpen && <aside className="notes-live-preview has-fast-scroll" id="notes-live-preview-scroll" ref={livePreviewScrollRef} aria-label="Live formatted preview">
                 <div className="notes-live-preview-heading"><small>Formatted preview</small></div>
                 {activeNote.content.trim()
-                  ? <NotesMarkdown content={activeNote.content} headingIdPrefix="notes-active" />
+                  ? <NotesMarkdown key={activeNote.id} content={activeNote.content} headingIdPrefix="notes-active" onContentChange={(content, group) => updateActiveNote({ content }, group)} />
                   : <p className="notes-live-preview-empty">Your formulas, fractions, chemistry, and formatting will appear here as you type.</p>}
               </aside>}
             </div>
             <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={handleImageInput} />
-          </div> : <NotesMarkdown content={activeNote.content} headingIdPrefix="notes-active" />}
+          </div> : <NotesMarkdown key={activeNote.id} content={activeNote.content} headingIdPrefix="notes-active" onContentChange={(content, group) => updateActiveNote({ content }, group)} />}
         </article>
       </div> : <div className="notes-empty-editor">
         <div>{icon("edit_note", 34)}</div><h1>{notesLoaded ? "Choose a note" : "Opening your notes…"}</h1><p>Select a page from the sidebar or start something new.</p><button type="button" onClick={() => createNote()}>{icon("add", 18)} New note</button>
@@ -1343,6 +1427,18 @@ export default function NotesPage() {
 
     {sidebarOpen && <button className="notes-sidebar-scrim" aria-label="Close notes navigation" onClick={() => setSidebarOpen(false)} />}
 
+    {tableRange && tableRange.noteId === activeNote?.id && <TableSizePicker onClose={() => { setTableRange(null); requestAnimationFrame(() => editorRef.current?.focus()); }} onInsert={(rows, columns) => {
+      const insertion = tableInsertion(activeNote.content, tableRange.start, tableRange.end, createTable(rows, columns));
+      updateActiveNote({ content: insertion.content });
+      setFormattedPreviewOpen(true);
+      setTableRange(null);
+      requestAnimationFrame(() => {
+        const tableIndex = insertion.content.slice(0, insertion.tableStart).split("\n").length - 1;
+        const table = livePreviewScrollRef.current?.querySelector<HTMLElement>(`[data-table-line="${tableIndex}"]`);
+        table?.scrollIntoView({ block: "nearest", inline: "nearest" });
+        table?.querySelector<HTMLButtonElement>("th button")?.focus();
+      });
+    }} />}
     {slashRange && <div className="notes-command-menu" style={{ left: menuAnchor.left, top: menuAnchor.top }}>
       <div className="notes-command-heading"><span>BLOCKS & FORMATTING</span><kbd>↑↓ Enter</kbd></div>
       <div className="notes-command-list">

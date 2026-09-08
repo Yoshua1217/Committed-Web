@@ -3,6 +3,8 @@
 import React from "react";
 import katex from "katex";
 import "katex/contrib/mhchem";
+import NotesTable from "./notes-table";
+import { collectMarkdownTables, serializeTable } from "@/lib/notes-tables";
 
 function safeUrl(value: string, image = false) {
   const trimmed = value.trim();
@@ -149,13 +151,16 @@ function parseInline(text: string, keyPrefix: string): React.ReactNode[] {
   return nodes;
 }
 
-export default function NotesMarkdown({ content, headingIdPrefix }: { content: string; headingIdPrefix?: string }) {
+export default function NotesMarkdown({ content, headingIdPrefix, onContentChange }: { content: string; headingIdPrefix?: string; onContentChange?: (content: string, historyGroup?: string) => void }) {
   const lines = content.split("\n");
   const generatedId = React.useId().replace(/:/g, "");
   const instanceId = headingIdPrefix ?? generatedId;
   const headings = collectMarkdownHeadings(content, instanceId);
 
   const headingByLine = new Map(headings.map((heading) => [heading.line, heading]));
+  const tables = collectMarkdownTables(content);
+  const tableByLine = new Map(tables.map((table) => [table.startLine, table]));
+  let tableEndLine = -1;
   const elements: React.ReactNode[] = [];
   let inCode = false;
   let codeLines: string[] = [];
@@ -168,6 +173,13 @@ export default function NotesMarkdown({ content, headingIdPrefix }: { content: s
   };
 
   lines.forEach((line, index) => {
+    if (index < tableEndLine) return;
+    const table = tableByLine.get(index);
+    if (table) {
+      tableEndLine = table.endLine;
+      elements.push(<NotesTable key={`table-${index}`} table={table} sourceLine={index} renderInline={(value) => parseInline(value, `table-${index}`)} onChange={onContentChange ? (next, group) => onContentChange(content.slice(0, table.start) + (next ? serializeTable(next) : "") + content.slice(table.end), group ? `table-${index}-${group}` : undefined) : undefined} />);
+      return;
+    }
     if (line.trim().startsWith("```")) {
       if (inCode) flushCode();
       else codeStart = index;
