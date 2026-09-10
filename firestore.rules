@@ -153,6 +153,22 @@ service cloud.firestore {
       allow create: if isOwner(request.resource.data);
       allow read, delete: if isOwner(resource.data);
       allow update: if isOwner(resource.data) && isOwner(request.resource.data);
+
+      match /surfaces/{surfaceId}/{nested=**} {
+        allow read, write: if isSignedIn()
+          && get(/databases/$(database)/documents/notes/$(documentId)).data.userId == request.auth.uid;
+      }
+      match /recordings/{recordingId} {
+        allow read, write: if isSignedIn()
+          && get(/databases/$(database)/documents/notes/$(documentId)).data.userId == request.auth.uid;
+      }
+    }
+
+    match /userSettings/{userId}/courses/{courseId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+    match /userSettings/{userId}/inkTemplates/{templateId}/{nested=**} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
     // Completion queries are scoped by userId. The referenced habit must also

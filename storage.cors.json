@@ -1,0 +1,15 @@
+[
+  {
+    "origin": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost",
+      "https://localhost",
+      "capacitor://localhost",
+      "https://yoshua1217.github.io"
+    ],
+    "method": ["GET", "HEAD"],
+    "responseHeader": ["Content-Type", "Content-Length", "Content-Disposition", "ETag"],
+    "maxAgeSeconds": 3600
+  }
+]

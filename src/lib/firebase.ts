@@ -1,13 +1,17 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
 import {
   getFirestore,
   initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
   type Firestore,
 } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
-import { getStorage } from "firebase/storage";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
+const useEmulators = process.env.NODE_ENV === "development" && process.env.NEXT_PUBLIC_FIREBASE_EMULATORS === "1";
 const firebaseConfig = {
   apiKey: "AIzaSyDQvaF2LF8NzAWpKU_JfcUN9dsXL_PBsJk",
   authDomain: "committed-2f3a9.firebaseapp.com",
@@ -16,6 +20,10 @@ const firebaseConfig = {
   messagingSenderId: "164172002698",
   appId: "1:164172002698:web:b33b8e7df21fff9c954473",
 };
+if (useEmulators) {
+  firebaseConfig.projectId = "demo-ink-workspace";
+  firebaseConfig.storageBucket = "demo-ink-workspace.appspot.com";
+}
 
 const existingApp = getApps().find((candidate) => candidate.name === "[DEFAULT]");
 const app = existingApp ?? initializeApp(firebaseConfig);
@@ -27,6 +35,7 @@ function getConfiguredFirestore(): Firestore {
   if (typeof window !== "undefined" && !existingApp) {
     return initializeFirestore(app, {
       experimentalForceLongPolling: true,
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
   }
 
@@ -39,4 +48,9 @@ export const auth = getAuth(app);
 export const db = getConfiguredFirestore();
 export const functions = getFunctions(app);
 export const storage = getStorage(app);
+if (useEmulators && typeof window !== "undefined" && !existingApp) {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectFirestoreEmulator(db, "127.0.0.1", 8085);
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
+}
 export default app;

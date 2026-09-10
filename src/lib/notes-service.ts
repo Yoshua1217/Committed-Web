@@ -3,6 +3,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   query,
   setDoc,
@@ -38,6 +39,7 @@ export interface MarkdownNote {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
+  initialSurface?: "typed" | "ink" | "pdf";
 }
 
 function asNumber(value: unknown, fallback = 0) {
@@ -71,6 +73,7 @@ function noteFromFirestore(id: string, data: Record<string, unknown>): MarkdownN
     sortOrder: asNumber(data.sortOrder),
     createdAt: asNumber(data.createdAt),
     updatedAt: asNumber(data.updatedAt),
+    initialSurface: data.initialSurface === "ink" || data.initialSurface === "pdf" ? data.initialSurface : "typed",
   };
 }
 
@@ -156,5 +159,10 @@ export async function saveMarkdownNote(note: MarkdownNote): Promise<void> {
 }
 
 export async function deleteMarkdownNote(noteId: string): Promise<void> {
+  const existing = await getDoc(doc(db, NOTE_COLLECTION, noteId));
+  if (existing.exists()) {
+    const { deleteNoteWorkspace } = await import("@/lib/ink-service");
+    await deleteNoteWorkspace(existing.data().userId, noteId);
+  }
   await deleteDoc(doc(db, NOTE_COLLECTION, noteId));
 }

@@ -42,3 +42,9 @@ next-env.d.ts
 
 # Android Studio SDK path (machine-specific)
 android/local.properties
+public/pdf.worker.min.mjs
+public/pdf-cmaps/
+public/pdf-fonts/
+public/pdf-wasm/
+.next-ink-test/
+/src/app/ink-lab/

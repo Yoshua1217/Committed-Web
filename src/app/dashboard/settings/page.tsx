@@ -10,6 +10,7 @@ import { subscribeToBuckets } from "@/lib/buckets-service";
 import { isHabitPausedOnDate } from "@/lib/streak-calculator";
 import MaterialIcon from "@/components/material-icon";
 import HomeCalendarMapping from "@/components/home-calendar-mapping";
+import CourseSettings from "@/components/course-settings";
 
 const COMPLETION_TYPE_LABELS: Record<Habit["completionType"], string> = {
   checkbox: "Checkbox",
@@ -171,6 +172,7 @@ export default function SettingsPage() {
       </h1>
 
       {/* Dark Mode */}
+      {user && <CourseSettings userId={user.uid} />}
       <div
         style={{
           background: "var(--surface)",

@@ -41,6 +41,12 @@ export async function resetAccountData(userId: string): Promise<void> {
         query(collection(db, collectionName), where("userId", "==", userId))
       );
 
+      if (collectionName === "notes") {
+        const { deleteNoteWorkspace } = await import("@/lib/ink-service");
+        const { deleteNoteImages } = await import("@/lib/note-image-service");
+        for (const note of snapshot.docs) { await deleteNoteWorkspace(userId, note.id); await deleteNoteImages(userId, note.id); }
+      }
+
       // Firestore limits a batch to 500 writes. Chunking keeps reset reliable for
       // accounts with a long habit history.
       for (let start = 0; start < snapshot.docs.length; start += 500) {
@@ -52,6 +58,11 @@ export async function resetAccountData(userId: string): Promise<void> {
       }
     }
 
+    const courses = await getDocs(collection(db, "userSettings", userId, "courses"));
+    for (const course of courses.docs) await deleteDoc(course.ref);
+    const { deleteInkTemplate, templatesPath } = await import("@/lib/ink-service");
+    const templates = await getDocs(collection(db, templatesPath(userId)));
+    for (const template of templates.docs) await deleteInkTemplate(userId, template.id);
     await deleteDoc(settingsRef);
   } catch (error) {
     await updateDoc(settingsRef, { resettingHabits: deleteField() });

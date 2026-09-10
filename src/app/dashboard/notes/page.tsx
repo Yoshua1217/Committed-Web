@@ -8,11 +8,13 @@ import {
   PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { sizeNoteEditor } from "@/lib/notes-editor-sizing";
 import {
   GoogleCalendarCache,
   SyncedGoogleCalendar,
@@ -34,6 +36,9 @@ import {
 import { deleteNoteImages, uploadNoteImage } from "@/lib/note-image-service";
 import NotesMarkdown, { collectMarkdownHeadings } from "@/components/notes-markdown";
 import NotesFastScroll from "@/components/notes-fast-scroll";
+import NoteWorkspace from "@/components/note-workspace";
+import { clearNoteDraft, readNoteDrafts, storeNoteDraft } from "@/lib/notes-local-drafts";
+import type { WorkspaceSearchEntry } from "@/lib/note-workspace-search";
 import { TableSizePicker } from "@/components/notes-table";
 import { createTable, tableInsertion } from "@/lib/notes-tables";
 import { NotesHistory, listenForNoteHistory } from "@/lib/notes-history";
@@ -87,6 +92,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { id: "exponent", kind: "insert", value: "$base^{exponent}$", placeholder: "base", label: "Exponent", detail: "Type a base, then its exponent", icon: "superscript", keywords: "math power superscript squared cubed" },
   { id: "root", kind: "insert", value: "$\\sqrt{value}$", placeholder: "value", label: "Square root", detail: "Insert a square root", icon: "function", keywords: "math sqrt radical" },
   { id: "pi", kind: "insert", value: "π", label: "Pi", detail: "Insert π", icon: "function", keywords: "math symbol" },
+  { id: "delta", kind: "insert", value: "Δ", label: "Delta", detail: "Insert Δ for change", icon: "function", keywords: "delta triangle change math symbol" },
   { id: "degrees", kind: "insert", value: "°", label: "Degrees", detail: "Insert the degree symbol °", icon: "function", keywords: "degree angle temperature symbol" },
   { id: "dot", kind: "insert", value: "·", label: "Multiplication dot", detail: "Insert · for multiplication", icon: "function", keywords: "math multiply times product symbol" },
   { id: "image", kind: "image", label: "Image", detail: "Upload one or more images", icon: "add_photo_alternate", keywords: "photo picture upload paste" },
@@ -143,11 +149,11 @@ const FORMATTING_GUIDE = [
   },
   {
     id: "symbols",
-    title: "Pi, degrees, and multiplication",
+    title: "Pi, delta, degrees, and multiplication",
     icon: "function",
-    description: "Insert π, °, and · directly into your notes for equations, angles, temperatures, and multiplication.",
-    steps: "Type /pi for π, /degrees for °, or /dot for ·, then press Enter or tap the result.",
-    syntax: "Circumference = 2 · π · r\n\nAngle = 90°\n\n3 · 4 = 12",
+    description: "Insert π, Δ, °, and · directly into your notes for equations, changes, angles, temperatures, and multiplication.",
+    steps: "Type /pi for π, /delta for Δ (delta), /degrees for °, or /dot for ·, then press Enter or tap the result.",
+    syntax: "Circumference = 2 · π · r\n\nΔ Quantity = final quantity − initial quantity\n\nAngle = 90°\n\n3 · 4 = 12",
   },
   {
     id: "arrows",
@@ -172,7 +178,7 @@ const FORMATTING_GUIDE = [
     icon: "keyboard_command_key",
     description: "Open formatting and media tools without leaving the keyboard.",
     steps: "Start a line with /, type part of a command name, then press Enter or tap the result.",
-    syntax: "/subscript\n/chem\n/fraction\n/exponent\n/root\n/pi\n/degrees\n/dot\n/image\n/table",
+    syntax: "/subscript\n/chem\n/fraction\n/exponent\n/root\n/pi\n/delta\n/degrees\n/dot\n/image\n/table",
     commands: [
       ["/subscript", "Insert lowered text"],
       ["/chem", "Insert a chemical formula"],
@@ -180,6 +186,7 @@ const FORMATTING_GUIDE = [
       ["/exponent", "Insert a base and exponent"],
       ["/root", "Insert a square root"],
       ["/pi", "Insert π"],
+      ["/delta", "Insert Δ for change"],
       ["/degrees", "Insert °"],
       ["/dot", "Insert · for multiplication"],
       ["/image", "Open the image picker"],
@@ -294,7 +301,7 @@ function matchesNote(note: MarkdownNote, query: string) {
   return !normalized || note.title.toLocaleLowerCase().includes(normalized) || note.content.toLocaleLowerCase().includes(normalized);
 }
 
-function caretAnchor(textarea: HTMLTextAreaElement): MenuAnchor {
+function caretAnchor(textarea: HTMLTextAreaElement, constrainMenu = true): MenuAnchor {
   const rect = textarea.getBoundingClientRect();
   const computed = window.getComputedStyle(textarea);
   const mirror = document.createElement("div");
@@ -320,7 +327,7 @@ function caretAnchor(textarea: HTMLTextAreaElement): MenuAnchor {
   mirror.remove();
   return {
     left: Math.min(window.innerWidth - 300, Math.max(12, markerRect.left - textarea.scrollLeft)),
-    top: Math.max(160, markerRect.top - textarea.scrollTop),
+    top: constrainMenu ? Math.max(160, markerRect.top - textarea.scrollTop) : markerRect.top - textarea.scrollTop,
   };
 }
 
@@ -340,6 +347,12 @@ export default function NotesPage() {
   const [notesLoaded, setNotesLoaded] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [newNoteMenu, setNewNoteMenu] = useState<{ folderId?: string | null } | null>(null);
+  const [typedSurfaceActive, setTypedSurfaceActive] = useState(true);
+
+  const [workspaceHeaderTarget, setWorkspaceHeaderTarget] = useState<HTMLDivElement | null>(null);
+  const [copyingWorkspace, setCopyingWorkspace] = useState(false);
+  const lastTypedCursorRef = useRef(0);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [draggedNotebookId, setDraggedNotebookId] = useState<string | null>(null);
@@ -347,6 +360,7 @@ export default function NotesPage() {
   const [sidebarQuery, setSidebarQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [workspaceIndex, setWorkspaceIndex] = useState<WorkspaceSearchEntry[]>([]), [indexLoading, setIndexLoading] = useState(false), [indexedCount, setIndexedCount] = useState(0), [workspaceVersion, setWorkspaceVersion] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageMenuOpen, setPageMenuOpen] = useState(false);
   const [notePendingDelete, setNotePendingDelete] = useState<MarkdownNote | null>(null);
@@ -392,15 +406,19 @@ export default function NotesPage() {
   useEffect(() => {
     if (!user) return;
     const saveTimers = saveTimersRef.current;
+    const recovered = readNoteDrafts(user.uid);
+    if (recovered.length) {
+      notesRef.current = recovered;
+      recovered.forEach(note => locallyDirtyNoteIdsRef.current.add(note.id));
+      // Hydrate the external recovery cache before a cloud snapshot can arrive.
+      setNotes(recovered);
+      recovered.forEach(note => { void saveMarkdownNote(note).then(() => clearNoteDraft(user.uid, note.id, note.updatedAt)).catch(() => setSaveState("error")); });
+    }
     const unsubscribeFolders = subscribeToNoteFolders(user.uid, (nextFolders) => {
       setFolders(nextFolders);
       setFoldersLoaded(true);
     });
     const unsubscribeNotes = subscribeToMarkdownNotes(user.uid, (nextNotes) => {
-      const editor = editorRef.current;
-      const preserveSelection = editor && document.activeElement === editor
-        ? { start: editor.selectionStart, end: editor.selectionEnd, scrollTop: editor.scrollTop }
-        : null;
       const localById = new Map(notesRef.current.map((note) => [note.id, note]));
       const mergedNotes = nextNotes.map((incomingNote) => {
         const localNote = localById.get(incomingNote.id);
@@ -421,17 +439,10 @@ export default function NotesPage() {
         if (!incomingIds.has(localNote.id) && isPending) mergedNotes.push(localNote);
       });
       notesRef.current = mergedNotes;
+      // React preserves selection when the controlled value is unchanged.
+      // Restoring a captured cursor on a later frame can rewind newer typing.
       setNotes(mergedNotes);
       setNotesLoaded(true);
-      if (preserveSelection) {
-        requestAnimationFrame(() => {
-          const currentEditor = editorRef.current;
-          if (!currentEditor || document.activeElement !== currentEditor) return;
-          const maximum = currentEditor.value.length;
-          currentEditor.setSelectionRange(Math.min(preserveSelection.start, maximum), Math.min(preserveSelection.end, maximum));
-          currentEditor.scrollTop = preserveSelection.scrollTop;
-        });
-      }
     });
     const localCalendarCache = readLocalCalendarSyncCache(user.uid);
     let promotedLocalCalendarCache = false;
@@ -459,6 +470,9 @@ export default function NotesPage() {
       unsubscribeFolders();
       unsubscribeNotes();
       unsubscribeCalendar();
+      // Enqueue final edits before disposing the debounce timers. Firestore's
+      // persistent queue can finish syncing after the user changes screens.
+      saveTimers.forEach((_, id) => { const pending = notesRef.current.find(note => note.id === id); if (pending) void saveMarkdownNote(pending).catch(console.error); });
       saveTimers.forEach(clearTimeout);
       saveTimers.clear();
     };
@@ -495,7 +509,7 @@ export default function NotesPage() {
     const savedMode = window.localStorage.getItem(NOTES_DEFAULT_EDITOR_MODE_KEY);
     const defaultMode: EditorMode = savedMode === "preview" || savedMode === "write"
       ? savedMode
-      : window.matchMedia("(max-width: 767px)").matches ? "preview" : "write";
+      : "write";
     const frame = window.requestAnimationFrame(() => {
       editorModePreferenceLoadedRef.current = true;
       setDefaultEditorMode(defaultMode);
@@ -597,6 +611,30 @@ export default function NotesPage() {
   const calendarMap = useMemo(() => new Map(calendars.map((calendar) => [calendar.id, calendar])), [calendars]);
   const activeNoteHeadings = useMemo(() => collectMarkdownHeadings(activeNote?.content ?? "", "notes-active"), [activeNote?.content]);
 
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || editorMode !== "write" || !typedSurfaceActive) return;
+    const resize = () => {
+      sizeNoteEditor(editor);
+      const container = documentScrollRef.current;
+      if (!container || document.activeElement !== editor) return;
+      const caret = caretAnchor(editor, false);
+      const bounds = container.getBoundingClientRect();
+      const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+      const bottom = Math.min(bounds.bottom, window.visualViewport ? window.visualViewport.offsetTop + window.visualViewport.height : window.innerHeight);
+      if (caret.top + lineHeight > bottom - 24) container.scrollTop += caret.top + lineHeight - bottom + 24;
+      else if (caret.top < bounds.top + 12) container.scrollTop -= bounds.top + 12 - caret.top;
+    };
+    resize();
+    let width = editor.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = editor.getBoundingClientRect().width;
+      if (nextWidth !== width) { width = nextWidth; resize(); }
+    });
+    observer.observe(editor);
+    return () => observer.disconnect();
+  }, [activeNote?.id, activeNote?.content, editorMode, typedSurfaceActive]);
+
   useEffect(() => {
     if (!user || !foldersLoaded || !notesLoaded || !notes.length || restoredLastNoteForUserRef.current === user.uid) return;
     const params = new URLSearchParams(window.location.search);
@@ -631,6 +669,7 @@ export default function NotesPage() {
   }, [notes, selectedNoteId, user]);
 
   const scheduleSave = useCallback((note: MarkdownNote) => {
+    storeNoteDraft(note);
     const previousTimer = saveTimersRef.current.get(note.id);
     if (previousTimer) clearTimeout(previousTimer);
     locallyDirtyNoteIdsRef.current.add(note.id);
@@ -641,6 +680,7 @@ export default function NotesPage() {
       saveTimersRef.current.delete(note.id);
       void saveMarkdownNote(note)
         .then(() => {
+          clearNoteDraft(note.userId, note.id, note.updatedAt);
           const latestNote = notesRef.current.find((item) => item.id === note.id);
           if ((!latestNote || latestNote.updatedAt <= note.updatedAt) && !saveTimersRef.current.has(note.id)) setSaveState("saved");
         })
@@ -665,7 +705,7 @@ export default function NotesPage() {
   }, [activeNote, scheduleSave]);
 
   useEffect(() => {
-    if (!activeNote || searchOpen || settingsOpen || tableRange || notePendingDelete) return;
+    if (!activeNote || !typedSurfaceActive || searchOpen || settingsOpen || tableRange || notePendingDelete) return;
     return listenForNoteHistory(documentScrollRef.current, (direction) => {
       const current = notesRef.current.find((note) => note.id === activeNote.id) ?? activeNote;
       const content = contentHistoryRef.current.step(`${current.userId}:${current.id}`, current.content, direction);
@@ -674,7 +714,7 @@ export default function NotesPage() {
       setSlashRange(null);
       setLinkRange(null);
     });
-  }, [activeNote, notePendingDelete, searchOpen, settingsOpen, tableRange, updateActiveNote]);
+  }, [activeNote, typedSurfaceActive, notePendingDelete, searchOpen, settingsOpen, tableRange, updateActiveNote]);
 
   const selectNote = (note: MarkdownNote) => {
     setSelectedNoteId(note.id);
@@ -720,6 +760,12 @@ export default function NotesPage() {
   };
 
   const createNote = (folderId?: string | null) => {
+    setNewNoteMenu({ folderId });
+  };
+
+  const createNoteOfType = (kind: "typed" | "ink" | "pdf") => {
+    const folderId = newNoteMenu?.folderId;
+    setNewNoteMenu(null);
     if (!user) return;
     const destinationId = folderId ?? effectiveFolderId;
     const destination = destinationId ? folderMap.get(destinationId) : notebooks[0];
@@ -735,16 +781,20 @@ export default function NotesPage() {
       notebookId: destination.kind === "notebook" ? destination.id : destination.notebookId,
       title: "Untitled note",
       content: "",
+      initialSurface: kind,
       sortOrder: now,
       createdAt: now,
       updatedAt: now,
     };
+    storeNoteDraft(note);
+    notesRef.current = [...notesRef.current, note];
+    locallyDirtyNoteIdsRef.current.add(note.id);
     setNotes((current) => [...current, note]);
     setSelectedNoteId(note.id);
     setSelectedFolderId(destination.id);
     setExpandedIds((current) => new Set(current).add(destination.id));
-    setEditorMode(defaultEditorMode);
-    void saveMarkdownNote(note).catch(() => setSaveState("error"));
+    setEditorMode("write");
+    void saveMarkdownNote(note).then(() => clearNoteDraft(note.userId, note.id, note.updatedAt)).catch(() => setSaveState("error"));
     requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".notes-title-input")?.select());
   };
 
@@ -807,6 +857,7 @@ export default function NotesPage() {
     if (!notePendingDelete) return;
     const deletedNote = notePendingDelete;
     const noteId = deletedNote.id;
+    clearNoteDraft(deletedNote.userId, noteId);
     const nextSelection = notes.find((note) => note.id !== noteId)?.id ?? null;
     const pendingSave = saveTimersRef.current.get(noteId);
     if (pendingSave) clearTimeout(pendingSave);
@@ -980,7 +1031,8 @@ export default function NotesPage() {
     const query = slashRange?.query.toLocaleLowerCase() ?? "";
     return SLASH_COMMANDS
       .filter((command) => `${command.id} ${command.label} ${command.keywords}`.toLocaleLowerCase().includes(query))
-      .sort((a, b) => Number(b.id === query) - Number(a.id === query));
+      .sort((a, b) => Number(b.id === query) - Number(a.id === query)
+        || Number(b.id.startsWith(query)) - Number(a.id.startsWith(query)));
   }, [slashRange]);
 
   const linkResults = useMemo(() => notes
@@ -1143,6 +1195,7 @@ export default function NotesPage() {
 
   const sidebarResults = notes.filter((note) => matchesNote(note, sidebarQuery)).slice(0, 20);
   const globalResults = notes.filter((note) => matchesNote(note, searchQuery)).sort((a, b) => b.updatedAt - a.updatedAt);
+  const pageResults = searchQuery.trim() ? workspaceIndex.filter(entry => `${entry.title} ${entry.text}`.toLowerCase().includes(searchQuery.trim().toLowerCase())) : [];
 
   const renderFolder = (folder: NoteFolder, depth: number): React.ReactNode => {
     const children = folders.filter((item) => item.parentId === folder.id);
@@ -1274,7 +1327,7 @@ export default function NotesPage() {
     <aside className={`notes-sidebar ${sidebarOpen ? "is-open" : ""}`}>
       <div className="notes-sidebar-header">
         <div className="notes-sidebar-brand">
-          <div><strong>Notes</strong><span>Markdown workspace</span></div>
+          <div><strong>Notes</strong><span>Text, handwriting & PDFs</span></div>
           <div className="notes-sidebar-brand-actions">
             <button
               type="button"
@@ -1317,7 +1370,7 @@ export default function NotesPage() {
       </div>
       <div className="notes-sidebar-footer">
         <button type="button" onClick={() => setSettingsOpen(true)}>{icon("settings", 19)}<span>Notes settings</span></button>
-        <span className={`notes-save-state is-${saveState}`}>{saveState === "saving" ? "Saving…" : saveState === "error" ? "Save failed" : "All changes saved"}</span>
+        <span className={`notes-save-state is-${saveState}`}>{saveState === "saving" ? "Saving text…" : saveState === "error" ? "Text save failed" : "Typed note saved"}</span>
       </div>
       <button type="button" className="notes-sidebar-resizer" aria-label="Resize notes navigation" title="Drag to resize sidebar" onPointerDown={beginSidebarResize} />
     </aside>
@@ -1330,12 +1383,13 @@ export default function NotesPage() {
             {activeNote ? <><span>{folderMap.get(activeNote.notebookId)?.name ?? "Notes"}</span>{activeNote.folderId !== activeNote.notebookId && <>{icon("chevron_right", 15)}<span>{folderMap.get(activeNote.folderId)?.name}</span></>}</> : <span>Notes</span>}
           </div>
         </div>
+        <div ref={setWorkspaceHeaderTarget} className="notes-workspace-header ink-ui" />
         <div className="notes-editor-toolbar-actions">
-          <div className="notes-mode-switch" role="group" aria-label="Editor mode">
+          {typedSurfaceActive && <div className="notes-mode-switch" role="group" aria-label="Editor mode">
             <button type="button" className={editorMode === "write" ? "is-active" : ""} onClick={() => setEditorMode("write")}>{icon("edit_note", 17)} Write</button>
             <button type="button" className={editorMode === "preview" ? "is-active" : ""} onClick={() => setEditorMode("preview")}>{icon("visibility", 17)} Preview</button>
-          </div>
-          {editorMode === "write" && <button
+          </div>}
+          {typedSurfaceActive && editorMode === "write" && <button
             type="button"
             className={`notes-live-preview-toggle${formattedPreviewOpen ? " is-active" : ""}`}
             aria-label={formattedPreviewOpen ? "Close formatted preview" : "Open formatted preview"}
@@ -1344,9 +1398,11 @@ export default function NotesPage() {
             onClick={() => setFormattedPreviewOpen((open) => !open)}
           >{icon("vertical_split", 19)}</button>}
           <button type="button" className="notes-toolbar-search" onClick={() => setSearchOpen(true)} title="Global search (Ctrl + S)">{icon("search", 19)}</button>
+
           <div className="notes-page-menu-wrap">
             <button type="button" className="notes-page-menu-trigger" aria-label="Page options" onClick={() => setPageMenuOpen((open) => !open)}>{icon("more_horiz", 21)}</button>
             {pageMenuOpen && <div className="notes-page-menu">
+              <button type="button" disabled={!activeNote || copyingWorkspace} onClick={() => { if (!activeNote) return; setPageMenuOpen(false); setCopyingWorkspace(true); showImageNotice("Copying the whole note…"); void import("@/lib/note-workspace-copy").then(async ({ copyNoteWorkspace }) => { await saveMarkdownNote(activeNote); const copy = await copyNoteWorkspace(activeNote, showImageNotice); setSelectedNoteId(copy.id); showImageNotice("Note copied with its pages, PDFs, and recordings."); }).catch(e => showImageNotice(e.message, true)).finally(() => setCopyingWorkspace(false)); }}>{icon("content_copy", 18)}<span><strong>{copyingWorkspace ? "Copying note…" : "Duplicate note"}</strong><small>Copy all tabs, pages, and files</small></span></button>
               <button type="button" onClick={downloadActiveNote} disabled={!activeNote}>{icon("download", 18)}<span><strong>Export Markdown</strong><small>Download this page as .md</small></span></button>
               <button type="button" className="is-danger" onClick={() => { if (activeNote) setNotePendingDelete(activeNote); setPageMenuOpen(false); }} disabled={!activeNote}>{icon("delete", 18)}<span><strong>Delete note</strong><small>Remove this page permanently</small></span></button>
             </div>}
@@ -1375,6 +1431,11 @@ export default function NotesPage() {
             <span>Edited {new Date(activeNote.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
             <span>Markdown</span>
           </div>
+          <NoteWorkspace headerTarget={workspaceHeaderTarget} key={`${activeNote.id}:${workspaceVersion}`} note={activeNote} calendarId={folderMap.get(activeNote.notebookId)?.calendarId} onSurfaceChange={setTypedSurfaceActive} onInsert={(markdown) => {
+            const cursor = Math.min(lastTypedCursorRef.current, activeNote.content.length);
+            updateActiveNote({ content: `${activeNote.content.slice(0, cursor)}\n\n${markdown}\n\n${activeNote.content.slice(cursor)}` });
+            setEditorMode("write");
+          }}>
           {editorMode === "write" ? <div className="notes-editor-area">
             <div className="notes-format-strip" aria-label="Text formatting">
               <button type="button" onClick={() => wrapSelection("**", "**", "bold text")} title="Bold (Ctrl+B)">{icon("format_bold", 18)}</button>
@@ -1395,6 +1456,7 @@ export default function NotesPage() {
                   onChange={handleEditorChange}
                   onKeyDown={handleEditorKeyDown}
                   onPaste={handleEditorPaste}
+                  onBlur={(event) => { lastTypedCursorRef.current = event.currentTarget.selectionStart; }}
                   onClick={(event) => refreshFloatingMenu(event.currentTarget)}
                   placeholder={'Start writing…\n\nType "/" for commands or "[[" to link a note.'}
                   spellCheck
@@ -1410,11 +1472,12 @@ export default function NotesPage() {
             </div>
             <input ref={imageInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={handleImageInput} />
           </div> : <NotesMarkdown key={activeNote.id} content={activeNote.content} headingIdPrefix="notes-active" onContentChange={(content, group) => updateActiveNote({ content }, group)} />}
+          </NoteWorkspace>
         </article>
       </div> : <div className="notes-empty-editor">
         <div>{icon("edit_note", 34)}</div><h1>{notesLoaded ? "Choose a note" : "Opening your notes…"}</h1><p>Select a page from the sidebar or start something new.</p><button type="button" onClick={() => createNote()}>{icon("add", 18)} New note</button>
       </div>}
-      {activeNote && (editorMode === "preview" || formattedPreviewOpen) && <NotesFastScroll
+      {activeNote && typedSurfaceActive && (editorMode === "preview" || formattedPreviewOpen) && <NotesFastScroll
         headings={activeNoteHeadings}
         scrollContainerRef={editorMode === "preview" ? documentScrollRef : livePreviewScrollRef}
         scrollContainerId={editorMode === "preview" ? "notes-document-scroll" : "notes-live-preview-scroll"}
@@ -1424,6 +1487,11 @@ export default function NotesPage() {
     </main>
 
     {imageUploadNotice && <div className={`notes-upload-notice${imageUploadNotice.error ? " is-error" : ""}`} role="status">{imageUploadNotice.message}</div>}
+
+    {newNoteMenu && <div className="ink-modal-scrim ink-ui" onClick={() => setNewNoteMenu(null)}><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="New note type" onClick={event => event.stopPropagation()}>
+      <div className="ink-dialog-title"><h2>What would you like to create?</h2><button aria-label="Close" onClick={() => setNewNoteMenu(null)}>×</button></div>
+      <div className="ink-new-note-options"><button autoFocus className="ink-primary" onClick={() => createNoteOfType("typed")}><strong>T · Typed note</strong><small>Default · Start typing, add handwriting or PDFs anytime.</small></button><button onClick={() => createNoteOfType("ink")}><strong>✎ · Handwritten pages</strong><small>Start with your course paper and favourite pen.</small></button><button onClick={() => createNoteOfType("pdf")}><strong>▤ · PDF note</strong><small>Import a document to annotate and sync across devices.</small></button></div>
+    </section></div>}
 
     {sidebarOpen && <button className="notes-sidebar-scrim" aria-label="Close notes navigation" onClick={() => setSidebarOpen(false)} />}
 
@@ -1471,13 +1539,15 @@ export default function NotesPage() {
       <div className="notes-search-modal">
         <div className="notes-search-modal-input">{icon("search", 24)}<input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search every note…" /><kbd>ESC</kbd></div>
         <div className="notes-search-modal-body">
+          <button type="button" disabled={indexLoading} onClick={() => { setIndexLoading(true); setIndexedCount(0); void import("@/lib/note-workspace-search").then(({ loadWorkspaceSearch }) => loadWorkspaceSearch(notesRef.current, setIndexedCount)).then(setWorkspaceIndex).catch(e => showImageNotice(e.message, true)).finally(() => setIndexLoading(false)); }}><span><strong>{indexLoading ? `Reading page text · ${indexedCount}/${notes.length}` : workspaceIndex.length ? "Refresh handwriting & PDF search" : "Include handwriting & PDFs"}</strong><small>Search PDF text, labels, extra typed tabs, and reviewed handwriting across every notebook.</small></span></button>
           <p>{searchQuery ? `${globalResults.length} result${globalResults.length === 1 ? "" : "s"}` : "Recently edited"}</p>
           {globalResults.slice(0, 30).map((note) => <button type="button" key={note.id} onClick={() => selectNote(note)}>
             <span className="notes-search-modal-icon">{icon("description", 20)}</span>
             <span><strong>{note.title}</strong><small>{contextSnippet(note.content, searchQuery)}</small><em>{folderMap.get(note.notebookId)?.name ?? "Notes"} / {folderMap.get(note.folderId)?.name ?? "Unfiled"}</em></span>
             {icon("north_west", 17)}
           </button>)}
-          {!globalResults.length && <div className="notes-search-empty">{icon("search_off", 28)}<strong>No matching notes</strong><span>Try another title or phrase.</span></div>}
+          {pageResults.slice(0, 50).map(entry => <button type="button" key={`${entry.noteId}:${entry.surfaceId}:${entry.pageId ?? ""}`} onClick={() => { const note = notes.find(n => n.id === entry.noteId); if (!note) return; const query = new URLSearchParams({ note: note.id, surface: entry.surfaceId, ...(entry.pageId ? { page: entry.pageId } : {}) }); window.history.replaceState(null, "", `${location.pathname}?${query}`); void import("@/lib/ink-service").then(({ saveInk, surfacePath }) => saveInk(surfacePath(note.id), { id: entry.surfaceId, hidden: false })).catch(e => showImageNotice(e.message, true)); setWorkspaceVersion(v => v + 1); selectNote(note); }}><span className="notes-search-modal-icon">{icon("ink_pen", 20)}</span><span><strong>{entry.title}</strong><small>{contextSnippet(entry.text, searchQuery)}</small></span>{icon("north_west", 17)}</button>)}
+          {!globalResults.length && !pageResults.length && <div className="notes-search-empty">{icon("search_off", 28)}<strong>No matching notes</strong><span>Try another title or phrase.</span></div>}
         </div>
       </div>
     </div>}

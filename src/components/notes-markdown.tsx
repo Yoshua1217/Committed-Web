@@ -5,6 +5,7 @@ import katex from "katex";
 import "katex/contrib/mhchem";
 import NotesTable from "./notes-table";
 import { collectMarkdownTables, serializeTable } from "@/lib/notes-tables";
+import { formatNoteMath } from "@/lib/notes-math";
 
 function safeUrl(value: string, image = false) {
   const trimmed = value.trim();
@@ -20,9 +21,10 @@ function safeUrl(value: string, image = false) {
 }
 
 function renderMath(token: string, key: string) {
-  const expression = token.slice(1, -1);
+  const expression = formatNoteMath(token.slice(1, -1));
   try {
-    const html = katex.renderToString(expression, {
+    // Keep inline placement, but use full-size numerators and denominators.
+    const html = katex.renderToString(`\\displaystyle ${expression}`, {
       displayMode: false,
       throwOnError: true,
       strict: "warn",

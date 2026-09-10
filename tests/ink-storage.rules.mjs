@@ -1,0 +1,12 @@
+import { before, after, test } from "node:test";
+import fs from "node:fs";
+import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
+import { ref, uploadBytes, getBytes, deleteObject, listAll } from "firebase/storage";
+let env;
+before(async () => { env = await initializeTestEnvironment({ projectId: "demo-ink-workspace", storage: { host: "127.0.0.1", port: 9199, rules: fs.readFileSync(new URL("../storage.rules", import.meta.url), "utf8") } }); });
+after(async () => env?.cleanup());
+const storage = user => (user ? env.authenticatedContext(user) : env.unauthenticatedContext()).storage("gs://demo-ink-workspace.appspot.com");
+test("PDFs and audio upload to their owner's private file folder", async () => { for (const [name, type] of [["test.pdf", "application/pdf"], ["test.webm", "audio/webm"]]) { const target = ref(storage("alice"), `note-files/alice/note/${name}`); await assertSucceeds(uploadBytes(target, new Uint8Array([1, 2, 3]), { contentType: type })); await assertSucceeds(getBytes(target)); } });
+test("other users and signed-out devices cannot access private note files", async () => { for (const user of ["bob", null]) { const target = ref(storage(user), "note-files/alice/note/test.pdf"); await assertFails(getBytes(target)); await assertFails(uploadBytes(target, new Uint8Array([1]), { contentType: "application/pdf" })); await assertFails(deleteObject(target)); await assertFails(listAll(ref(storage(user), "note-files/alice/note"))); } });
+test("unsupported file types and oversized images are rejected", async () => { await assertFails(uploadBytes(ref(storage("alice"), "note-files/alice/note/script.js"), new Uint8Array([1]), { contentType: "application/javascript" })); await assertFails(uploadBytes(ref(storage("alice"), "note-images/alice/note/huge.png"), new Uint8Array(5 * 1024 * 1024 + 1), { contentType: "image/png" })); });
+test("lasso image uploads retain existing owner-only image access", async () => { const target = ref(storage("alice"), "note-images/alice/note/selection.webp"); await assertSucceeds(uploadBytes(target, new Uint8Array([1, 2, 3]), { contentType: "image/webp" })); await assertSucceeds(getBytes(target)); await assertFails(getBytes(ref(storage("bob"), "note-images/alice/note/selection.webp"))); });
