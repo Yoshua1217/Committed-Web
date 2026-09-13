@@ -46,8 +46,9 @@ export function drawObject(ctx: CanvasRenderingContext2D, o: InkObject, study = 
       for (let i = 0; i < o.points.length; i++) fountainRibbon(ctx, o, o.points[Math.max(0, i - 1)], o.points[i]);
       ctx.fill();
     } else if (o.style === "highlighter") {
-      ctx.strokeStyle = o.color; ctx.lineWidth = o.width; ctx.lineCap = "butt"; ctx.lineJoin = "round"; ctx.beginPath();
-      o.points.forEach((p, i) => { if (!i) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }); ctx.stroke();
+      ctx.strokeStyle = o.color; ctx.lineWidth = o.width; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath();
+      if (o.points.length === 1) { const p = o.points[0]; ctx.fillStyle = o.color; ctx.arc(p.x, p.y, o.width / 2, 0, Math.PI * 2); ctx.fill(); }
+      else { o.points.forEach((p, i) => { if (!i) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }); ctx.stroke(); }
     } else if (o.points.length === 1) { const p = o.points[0]; ctx.fillStyle = o.color; ctx.beginPath(); ctx.arc(p.x, p.y, o.width / 2, 0, Math.PI * 2); ctx.fill(); }
     else { if (o.style === "pencil") ctx.globalAlpha *= .72; for (let i = 1; i < o.points.length; i++) drawSegment(ctx, o, o.points[i - 1], o.points[i]); }
   } else {

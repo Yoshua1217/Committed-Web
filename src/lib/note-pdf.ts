@@ -2,6 +2,8 @@ import { InkObject, InkPage, NoteSurface } from "./ink-model";
 import { objectPath, readInk, readNoteFile } from "./ink-service";
 import { objectsPng } from "./ink-renderer";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import type { PdfTextLine } from "./pdf-highlight";
+export type { PdfTextLine } from "./pdf-highlight";
 
 export async function openPdf(blob: Blob): Promise<PDFDocumentProxy> {
   const pdfjs = await import("pdfjs-dist");
@@ -11,7 +13,6 @@ export async function openPdf(blob: Blob): Promise<PDFDocumentProxy> {
   pdfjs.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.min.mjs`;
   return pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()), cMapUrl: `${base}/pdf-cmaps/`, cMapPacked: true, standardFontDataUrl: `${base}/pdf-fonts/`, wasmUrl: `${base}/pdf-wasm/` }).promise;
 }
-export type PdfTextLine = { text: string; x: number; y: number; w: number; h: number };
 export async function renderPdfPage(pdf: PDFDocumentProxy, pageNumber: number, width: number, scale = 1.5) {
   const page = await pdf.getPage(pageNumber), natural = page.getViewport({ scale: 1 });
   const viewport = page.getViewport({ scale: width / natural.width });
@@ -25,7 +26,12 @@ export async function renderPdfPage(pdf: PDFDocumentProxy, pageNumber: number, w
     const dx = a / length * item.width, dy = b / length * item.width;
     const corners = [[x, y], [x + dx, y + dy], [x + c, y + d], [x + dx + c, y + dy + d]].map(([px, py]) => viewport.convertToViewportPoint(px, py));
     const left = Math.min(...corners.map(p => p[0])), top = Math.min(...corners.map(p => p[1]));
-    return [{ text: item.str, x: left, y: top, w: Math.max(1, Math.max(...corners.map(p => p[0])) - left), h: Math.max(1, Math.max(...corners.map(p => p[1])) - top) }];
+    const [sx, sy] = viewport.convertToViewportPoint(x + c / 2, y + d / 2);
+    const [ex, ey] = viewport.convertToViewportPoint(x + dx + c / 2, y + dy + d / 2);
+    const runLength = Math.hypot(ex - sx, ey - sy);
+    const ux = runLength ? (ex - sx) / runLength : 1, uy = runLength ? (ey - sy) / runLength : 0;
+    const height = Math.abs((corners[2][0] - corners[0][0]) * -uy + (corners[2][1] - corners[0][1]) * ux);
+    return [{ text: item.str, x: left, y: top, w: Math.max(1, Math.max(...corners.map(p => p[0])) - left), h: Math.max(1, Math.max(...corners.map(p => p[1])) - top), baseline: { x: sx, y: sy, ux, uy, length: runLength, height: Math.max(1, height) } }];
   });
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("PDF page could not be rendered.")), "image/png"));
   return { url: URL.createObjectURL(blob), lines, width: viewport.width, height: viewport.height };

@@ -12,7 +12,7 @@ import { readSurfaceDrafts, storeSurfaceDrafts, SurfaceDraft } from "@/lib/notes
 
 const InkEditor = dynamic(() => import("./ink-editor"), { ssr: false, loading: () => <div className="ink-empty">Opening writing tools…</div> });
 const MAIN: NoteSurface = { id: "main", kind: "typed", name: "Notes", order: -1 };
-export default function NoteWorkspace({ note, calendarId, children, onInsert, onSurfaceChange, headerTarget }: { headerTarget?: HTMLDivElement | null; note: MarkdownNote; calendarId?: string | null; children: ReactNode; onInsert: (markdown: string) => void; onSurfaceChange: (isTyped: boolean) => void }) {
+export default function NoteWorkspace({ note, calendarId, children, onInsert, onSurfaceChange, onExportSurfaces, headerTarget }: { onExportSurfaces?: (value: { noteId: string; surfaces: NoteSurface[] }) => void; headerTarget?: HTMLDivElement | null; note: MarkdownNote; calendarId?: string | null; children: ReactNode; onInsert: (markdown: string) => void; onSurfaceChange: (isTyped: boolean) => void }) {
 
   const [syncStatusTarget, setSyncStatusTarget] = useState<HTMLDivElement | null>(null);
   const [surfaces, setSurfaces] = useState<NoteSurface[]>([]), [active, setActive] = useState("main"), [second, setSecond] = useState("");
@@ -36,6 +36,7 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
     setActive(requested ?? localStorage.getItem(`ink-surface:${note.userId}:${note.id}`) ?? (note.initialSurface === "ink" ? "handwriting" : "main"));
     return () => { stop(); stopPrefs(); stopCourses(); };
   }, [note.id, note.userId, note.initialSurface, fail]);
+  useEffect(() => { if (loaded) onExportSurfaces?.({ noteId: note.id, surfaces }); }, [loaded, note.id, surfaces, onExportSurfaces]);
   const course = courseForNotebook(courses, note.notebookId, calendarId), paper = course?.paper ?? preferences.paper;
   const all = [surfaces.find(s => s.id === "main") ?? MAIN, ...surfaces.filter(s => s.id !== "main")].sort((a, b) => a.order - b.order);
   const tabs = all.filter(s => !s.hidden && !s.deleted);

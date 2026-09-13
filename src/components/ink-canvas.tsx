@@ -6,6 +6,7 @@ import { Capacitor } from "@capacitor/core";
 import { constrainInkView, fitInkView } from "@/lib/ink-viewport";
 import { InkObject, Paper, Pen, Point, eraseObjects, enhancePoints, fountainPool, fountainWidths, smoothFountainWidth, spreadFountainPool, withinInkHold, lassoObjects, objectBounds, recognizeHeldShape, shapePoints, transformObjects, uid } from "@/lib/ink-model";
 import { drawObject, drawObjects, drawPaper, drawSegment, loadInkImage } from "@/lib/ink-renderer";
+import { snapPdfHighlight, type PdfTextLine } from "@/lib/pdf-highlight";
 
 export type InkTool = "pen" | "eraser" | "lasso" | "pan" | "shape" | "cover" | "text";
 export type InkCanvasApi = { fit: () => void; fitWidth: () => void; zoom: (factor: number) => void };
@@ -18,6 +19,7 @@ type Props = {
   rectangularLasso?: boolean;
   focusMode?: boolean;
   continuous?: boolean;
+  pdfLines?: PdfTextLine[];
 };
 
 /** No React state, geometry scans, networking, or smoothing in the live ink path. */
@@ -160,7 +162,10 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     const position = (e: PointerEvent): Point => ({ x: Math.max(0, Math.min(latest.current.paper.width, (e.clientX - rect.left - view.current.x) / view.current.scale)), y: Math.max(0, Math.min(latest.current.paper.height, (e.clientY - rect.top - view.current.y) / view.current.scale)), p: e.pointerType === "pen" ? e.pressure || .5 : .5, t: e.timeStamp });
     const navStart = () => { const [a, b] = [...touches.values()]; if (!a) { navigation = null; return; } navigation = { x: b ? (a.x + b.x) / 2 : a.x, y: b ? (a.y + b.y) / 2 : a.y, distance: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0, view: { ...view.current } }; };
     const end = (e: PointerEvent) => {
-      if (touches.delete(e.pointerId)) { navStart(); setZoomLabel(Math.round(view.current.scale * 100)); return; }
+      if (touches.delete(e.pointerId)) {
+        if (e.pointerType === "pen") { lastPenTime = performance.now(); pointerIsPen = false; }
+        navStart(); setZoomLabel(Math.round(view.current.scale * 100)); return;
+      }
       if (active !== e.pointerId) return;
       clearInterval(holdTimer);
       const p = position(e), canceled = e.type === "pointercancel" || e.type === "lostpointercapture";
@@ -172,7 +177,8 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         if (options.tool === "cover" && start) { stroke = { ...stroke, kind: "cover", points: [], x: Math.min(start.x, p.x), y: Math.min(start.y, p.y), w: Math.max(24, Math.abs(p.x - start.x)), h: Math.max(24, Math.abs(p.y - start.y)), color: "#6366f1", opacity: 1 }; }
         // Live ink stays visible while only this stroke is enhanced. Append the
         // final stroke once, without repainting all earlier handwriting.
-        const finalStroke = options.enhancer && options.tool === "pen" && !held ? { ...stroke, points: enhancePoints(stroke.points, options.pen.smoothing) } : stroke;
+        const snapped = !canceled && options.tool === "pen" ? snapPdfHighlight(stroke, options.pdfLines ?? []) : stroke;
+        const finalStroke = snapped !== stroke ? snapped : options.enhancer && options.tool === "pen" && !held ? { ...stroke, points: enhancePoints(stroke.points, options.pen.smoothing) } : stroke;
         working = [...latest.current.objects, finalStroke]; paint(working, []); clear();
         active = null; gestureActive.current = false;
         options.onChange(working); options.onSelect([]);
@@ -200,6 +206,8 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       }
       if (latest.current.holdShapes && !holdAttempted && elapsed >= 550) {
         holdAttempted = true;
+        // Preserve the original gesture for text matching when the pen lifts.
+        if (snapPdfHighlight(stroke, latest.current.pdfLines ?? []) !== stroke) return;
         const shape = recognizeHeldShape(stroke.points);
         if (!shape) return;
         held = true; heldKind = shape.kind; stroke.points = shape.points;
@@ -211,7 +219,6 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       setZoomOpen(false);
       if (e.button !== 0 && e.pointerType !== "pen") return;
       const options = latest.current; rect = viewport.getBoundingClientRect();
-      if (options.continuous && e.pointerType === "touch" && (options.touch !== "draw" || options.tool === "pan")) return;
       viewport.closest<HTMLElement>(".ink-page-editor")?.focus({ preventScroll: true });
       if (e.pointerType === "touch" && (pointerIsPen || performance.now() - lastPenTime < 350 || e.width > 55 || e.height > 55)) return;
       if (e.pointerType === "touch" && options.touch === "draw" && active !== null && !pointerIsPen) {
@@ -276,15 +283,25 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         cursor.style.display = "block"; cursor.style.width = `${size}px`; cursor.style.height = `${size}px`; cursor.style.transform = `translate(${e.clientX - bounds.left - size / 2}px, ${e.clientY - bounds.top - size / 2}px)`;
       }
       if (touches.has(e.pointerId)) {
+        const previousTouch = touches.get(e.pointerId)!;
         touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         if (!navigation || (latest.current.tool !== "pan" && latest.current.touch === "ignore" && touches.size < 2 && e.pointerType === "touch")) return;
+        e.preventDefault();
+        if (latest.current.continuous && touches.size === 1) {
+          const scroll = viewport.closest<HTMLElement>(".ink-pdf-scroll");
+          if (scroll) {
+            scroll.scrollLeft += previousTouch.x - e.clientX;
+            scroll.scrollTop += previousTouch.y - e.clientY;
+          }
+          return;
+        }
         const [a, b] = [...touches.values()], x = b ? (a.x + b.x) / 2 : a.x, y = b ? (a.y + b.y) / 2 : a.y;
         const scale = b && navigation.distance ? Math.max(.1, Math.min(6, navigation.view.scale * Math.hypot(a.x - b.x, a.y - b.y) / navigation.distance)) : navigation.view.scale;
         if (b && navigation.distance) fitMode.current = "manual";
         view.current = { scale, x: x - rect.left - (navigation.x - rect.left - navigation.view.x) * scale / navigation.view.scale, y: y - rect.top - (navigation.y - rect.top - navigation.view.y) * scale / navigation.view.scale }; applyView(); return;
       }
       if (active !== e.pointerId || !start) return;
-      if (rawInput && pointerIsPen && e.type === "pointermove") return;
+      if (rawInput && pointerIsPen && e.type === "pointermove") { e.preventDefault(); return; }
       e.preventDefault(); const options = latest.current, p = position(e);
       if (erasing) { working = eraseObjects(working, previous!, p, options.eraserSize / 2, options.partialEraser); previous = p; paint(working); return; }
       if (moving) {
@@ -323,7 +340,9 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
   }, []);
   useEffect(() => { repaint.current(); let disposed = false; Promise.all(props.objects.filter(o => o.url).map(o => loadInkImage(o.url!).catch(() => null))).then(() => { if (!disposed) repaint.current(); }); return () => { disposed = true; }; }, [props.objects, props.selected, props.highlightBelow, props.study]);
 
-  return <div className="ink-viewport" ref={viewportRef} style={props.continuous && (props.touch !== "draw" || props.tool === "pan") ? { touchAction: "pan-y pinch-zoom" } : undefined} aria-label={props.continuous ? "Writing page. Use a stylus to write and scroll to other pages." : "Writing page. Use a stylus to write and two fingers to pan and zoom."} onContextMenu={e => e.preventDefault()}>
+  // Browser panning applies to pens too; keep it disabled before contact and
+  // route finger navigation through pointer handlers so palms cannot scroll ink.
+  return <div className="ink-viewport" ref={viewportRef} style={{ touchAction: "none" }} aria-label={props.continuous ? "Writing page. Use a stylus to write and scroll to other pages." : "Writing page. Use a stylus to write and two fingers to pan and zoom."} onContextMenu={e => e.preventDefault()}>
     <div className="ink-page" ref={pageRef} style={{ width: props.paper.width, height: props.paper.height, backgroundColor: props.paper.color, colorScheme: "only light" }}>
       <canvas ref={paperRef} />
       {/* eslint-disable-next-line @next/next/no-img-element */}

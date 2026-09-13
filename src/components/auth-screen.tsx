@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
+import logoPic from "../../public/logo.png";
 import { useAuth } from "@/lib/auth-context";
 
 export default function AuthScreen() {
@@ -79,22 +81,21 @@ export default function AuthScreen() {
       <div style={{ width: "100%", maxWidth: 400 }}>
         {/* Logo + Title */}
         <div style={{ textAlign: "center", marginBottom: 48 }}>
-          <div
+          <Image
+            src={logoPic}
+            alt="Committed logo"
+            width={72}
+            height={72}
+            priority
             style={{
               width: 72,
               height: 72,
               borderRadius: 20,
-              backgroundColor: "var(--primary)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
+              display: "inline-block",
+              objectFit: "contain",
               marginBottom: 24,
             }}
-          >
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--background)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          </div>
+          />
           <h1
             style={{
               fontSize: 32,

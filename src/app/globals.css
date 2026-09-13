@@ -1114,7 +1114,8 @@ body.notes-sidebar-resizing .notes-workspace { transition: none; }
 .notes-format-strip button { width: 31px; height: 31px; min-height: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--secondary); cursor: pointer; }
 .notes-format-strip button:hover { background: var(--surface-variant); color: var(--primary); }
 .notes-format-strip > span { width: 1px; height: 17px; margin: 0 4px; background: var(--border); }
-.notes-compose-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); align-items: start; gap: 24px; }
+.notes-editor-area { container-type: inline-size; }
+.notes-compose-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr); align-items: start; gap: 20px; }
 .notes-compose-grid.is-preview-closed { grid-template-columns: minmax(0, 1fr); }
 .notes-source-pane { min-width: 0; }
 .notes-pane-label, .notes-live-preview-heading { min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; color: var(--secondary); font-size: 9px; font-weight: 720; letter-spacing: .035em; text-transform: uppercase; }
@@ -1365,11 +1366,14 @@ body.notes-sidebar-resizing .notes-workspace { transition: none; }
   .notes-import-row select, .notes-calendar-links select { font-size: 16px !important; }
 }
 
-/* Keep the editor full-width when a window is snapped or the screen is small. */
-@media (max-width: 1200px) {
+/* Respond to the editor's actual width, including app and OS split views. */
+@container (max-width: 900px) {
   .notes-compose-grid { grid-template-columns: minmax(0, 1fr); }
-  .notes-live-preview,
-  .notes-live-preview-toggle,
+  .notes-compose-grid:not(.is-preview-closed) .notes-source-pane { grid-row: 2; }
+  .notes-live-preview { grid-row: 1; position: relative; top: auto; max-height: 30dvh; padding: 12px 14px 16px; }
+  .notes-live-preview-heading { top: -12px; margin: -12px -14px 10px; padding: 9px 12px; }
+}
+@media (max-width: 1200px) {
   .notes-editor-shell:has(.notes-document.is-writing) > .notes-fast-scroll { display: none; }
 }
 

@@ -43,6 +43,9 @@ import { TableSizePicker } from "@/components/notes-table";
 import { createTable, tableInsertion } from "@/lib/notes-tables";
 import { NotesHistory, listenForNoteHistory } from "@/lib/notes-history";
 
+import type { NoteSurface } from "@/lib/ink-model";
+import { markdownPages } from "@/lib/notes-markdown-export";
+
 type EditorMode = "write" | "preview";
 type MenuAnchor = { left: number; top: number };
 
@@ -268,11 +271,6 @@ function translucentCalendarColor(color: string, alpha: number) {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-function slugFilename(title: string) {
-  const clean = title.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, " ");
-  return `${clean || "Untitled note"}.md`;
-}
-
 // Kept outside the React render scope so timestamps are created only from
 // explicit user actions, never as part of rendering.
 function actionTimestamp() {
@@ -348,6 +346,7 @@ export default function NotesPage() {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [newNoteMenu, setNewNoteMenu] = useState<{ folderId?: string | null } | null>(null);
+  const [exportSurfaces, setExportSurfaces] = useState<{ noteId: string; surfaces: NoteSurface[] } | null>(null);
   const [typedSurfaceActive, setTypedSurfaceActive] = useState(true);
 
   const [workspaceHeaderTarget, setWorkspaceHeaderTarget] = useState<HTMLDivElement | null>(null);
@@ -842,14 +841,17 @@ export default function NotesPage() {
   };
 
   const downloadActiveNote = () => {
-    if (!activeNote) return;
-    const body = `# ${activeNote.title.trim() || "Untitled note"}\n\n${activeNote.content}`;
-    const url = URL.createObjectURL(new Blob([body], { type: "text/markdown;charset=utf-8" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = slugFilename(activeNote.title);
-    anchor.click();
-    URL.revokeObjectURL(url);
+    if (!activeNote || exportSurfaces?.noteId !== activeNote.id) return;
+    for (const page of markdownPages(activeNote, exportSurfaces.surfaces)) {
+      const url = URL.createObjectURL(new Blob([page.body], { type: "text/markdown;charset=utf-8" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = page.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
     setPageMenuOpen(false);
   };
 
@@ -1403,7 +1405,7 @@ export default function NotesPage() {
             <button type="button" className="notes-page-menu-trigger" aria-label="Page options" onClick={() => setPageMenuOpen((open) => !open)}>{icon("more_horiz", 21)}</button>
             {pageMenuOpen && <div className="notes-page-menu">
               <button type="button" disabled={!activeNote || copyingWorkspace} onClick={() => { if (!activeNote) return; setPageMenuOpen(false); setCopyingWorkspace(true); showImageNotice("Copying the whole note…"); void import("@/lib/note-workspace-copy").then(async ({ copyNoteWorkspace }) => { await saveMarkdownNote(activeNote); const copy = await copyNoteWorkspace(activeNote, showImageNotice); setSelectedNoteId(copy.id); showImageNotice("Note copied with its pages, PDFs, and recordings."); }).catch(e => showImageNotice(e.message, true)).finally(() => setCopyingWorkspace(false)); }}>{icon("content_copy", 18)}<span><strong>{copyingWorkspace ? "Copying note…" : "Duplicate note"}</strong><small>Copy all tabs, pages, and files</small></span></button>
-              <button type="button" onClick={downloadActiveNote} disabled={!activeNote}>{icon("download", 18)}<span><strong>Export Markdown</strong><small>Download this page as .md</small></span></button>
+              <button type="button" onClick={downloadActiveNote} disabled={!activeNote || exportSurfaces?.noteId !== activeNote.id}>{icon("download", 18)}<span><strong>Export Markdown</strong><small>Download each typed page as .md</small></span></button>
               <button type="button" className="is-danger" onClick={() => { if (activeNote) setNotePendingDelete(activeNote); setPageMenuOpen(false); }} disabled={!activeNote}>{icon("delete", 18)}<span><strong>Delete note</strong><small>Remove this page permanently</small></span></button>
             </div>}
           </div>
@@ -1431,7 +1433,7 @@ export default function NotesPage() {
             <span>Edited {new Date(activeNote.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
             <span>Markdown</span>
           </div>
-          <NoteWorkspace headerTarget={workspaceHeaderTarget} key={`${activeNote.id}:${workspaceVersion}`} note={activeNote} calendarId={folderMap.get(activeNote.notebookId)?.calendarId} onSurfaceChange={setTypedSurfaceActive} onInsert={(markdown) => {
+          <NoteWorkspace onExportSurfaces={setExportSurfaces} headerTarget={workspaceHeaderTarget} key={`${activeNote.id}:${workspaceVersion}`} note={activeNote} calendarId={folderMap.get(activeNote.notebookId)?.calendarId} onSurfaceChange={setTypedSurfaceActive} onInsert={(markdown) => {
             const cursor = Math.min(lastTypedCursorRef.current, activeNote.content.length);
             updateActiveNote({ content: `${activeNote.content.slice(0, cursor)}\n\n${markdown}\n\n${activeNote.content.slice(cursor)}` });
             setEditorMode("write");
@@ -1448,7 +1450,6 @@ export default function NotesPage() {
             </div>
             <div className={`notes-compose-grid${formattedPreviewOpen ? "" : " is-preview-closed"}`}>
               <div className="notes-source-pane">
-                <div className="notes-pane-label"><span>Source</span><small>Keep typing—formatting updates live</small></div>
                 <textarea
                   ref={editorRef}
                   className="notes-markdown-editor"
