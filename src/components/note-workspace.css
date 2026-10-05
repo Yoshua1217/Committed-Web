@@ -271,7 +271,9 @@
 .ink-stacked-page .ink-viewport, .ink-focus-mode .ink-stacked-page .ink-viewport { min-height: 480px; flex: none; overscroll-behavior: auto; }
 
 /* The document owns overflow; enlarged pages must contribute their full width. */
-.ink-document-viewer { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.ink-document-viewer { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.ink-document-viewer > .ink-view-controls { position: absolute; top: 8px; left: 8px; z-index: 3; max-width: calc(100% - 64px); padding: 0; border: 0; background: transparent; }
+.ink-document-viewer > .ink-view-controls > span { padding: 6px 8px; border-radius: 6px; background: var(--surface); color: var(--primary); }
 /* Keep a bounded viewport: flex growth would stretch it to the full page stack,
    leaving no internal overflow and trapping wheel events at the scroll boundary. */
 .ink-document-viewer .ink-pdf-scroll { flex: none; scrollbar-width: none; touch-action: none; overflow-anchor: none; overscroll-behavior: contain; }
@@ -280,3 +282,17 @@
 .ink-document-pages { min-width: 100%; }
 .ink-document-pages .ink-stacked-page, .ink-document-pages .ink-scrolling-page { max-width: none; }
 .ink-document-pages .ink-stacked-page .ink-viewport { min-height: 0; }
+
+/* Size a single PDF/drawing workspace from the space actually left below the
+   navigation and document controls, rather than subtracting a fixed toolbar height. */
+.notes-document-scroll:has(.note-workspace:not(.has-split) .ink-editor) { overflow: hidden; }
+.notes-document:has(> .note-workspace:not(.has-split) .ink-editor) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.notes-document:has(> .note-workspace:not(.has-split) .ink-editor) > .notes-document-title-row,
+.notes-document:has(> .note-workspace:not(.has-split) .ink-editor) > .notes-document-meta { flex-shrink: 0; }
+.notes-document > .note-workspace:not(.has-split):has(.ink-editor) { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.notes-document > .note-workspace:not(.has-split):has(.ink-editor) > .ink-workspace-panels { flex: 1; min-height: 0; }
+.notes-document > .note-workspace:not(.has-split) > .ink-workspace-panels > .ink-workspace-panel:has(> .ink-editor) { display: flex; flex-direction: column; min-height: 0; }
+.notes-document > .note-workspace:not(.has-split) .ink-editor { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.notes-document > .note-workspace:not(.has-split) .ink-editor > .ink-page-controls { flex-shrink: 0; }
+.notes-document > .note-workspace:not(.has-split) .ink-editor > .ink-editor-body { flex: 1; min-height: 0; }
+.notes-document > .note-workspace:not(.has-split) .ink-document-viewer > .ink-pdf-scroll { flex: 1; height: auto; min-height: 0; }
