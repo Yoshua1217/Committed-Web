@@ -5,6 +5,7 @@ import { preserveInkReadingPosition, preserveInkScroll } from "@/lib/ink-scroll"
 import { TbArrowLeft, TbArrowRight, TbEraser, TbGeometry, TbHandMove, TbLasso, TbPhoto, TbEyeOff, TbSettings, TbLayoutSidebarLeftExpand, TbBookmark, TbBookmarkFilled, TbTemplate, TbFileExport, TbMaximize, TbMinimize, TbZoomIn, TbZoomOut, TbSearch, TbBriefcase2 } from "react-icons/tb";
 import { createPortal } from "react-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import InkDocumentViewport, { useDocumentView } from "./ink-document-viewport";
 import InkCanvas, { InkCanvasApi, InkTool } from "./ink-canvas";
 import { Course, InkObject, InkPage, InkPreferences, InkTemplate, NoteSurface, Paper, Pen, newPage, objectBounds, transformObjects, uid } from "@/lib/ink-model";
 import { deleteInkTemplate, listenInk, objectPath, pagePath, readInk, readNoteFile, saveInk, saveInkChanges, templatesPath } from "@/lib/ink-service";
@@ -51,6 +52,7 @@ function PageThumbnail({ noteId, surfaceId, page, pdf, width = 100 }: { noteId: 
 }
 
 function ScrollingPdfPage({ noteId, surfaceId, page, pdf, number, preload = false, onAnnotate }: { noteId: string; surfaceId: string; page: InkPage; pdf: PDFDocumentProxy | null; number: number; preload?: boolean; onAnnotate: () => void }) {
+  const documentView = useDocumentView();
   const root = useRef<HTMLElement>(null);
   const [nearby, setNearby] = useState(preload);
   if (preload && !nearby) setNearby(true);
@@ -59,7 +61,7 @@ function ScrollingPdfPage({ noteId, surfaceId, page, pdf, number, preload = fals
     if (root.current) observer.observe(root.current);
     return () => observer.disconnect();
   }, []);
-  return <section ref={root} data-pdf-page-id={page.id} className="ink-scrolling-page" aria-label={`Page ${number}`}>
+  return <section ref={root} data-pdf-page-id={page.id} className="ink-scrolling-page" style={{ width: page.paper.width * (documentView?.scale ?? 1) }} aria-label={`Page ${number}`}>
     <header><span>Page {number}{page.label ? ` · ${page.label}` : ""}</span><button onClick={onAnnotate}>Annotate page</button></header>
     <div className="ink-scrolling-page-image" style={{ aspectRatio: `${page.paper.width} / ${page.paper.height}` }}>
       {nearby && (pdf || !page.pdfPage) ? <PageThumbnail noteId={noteId} surfaceId={surfaceId} page={page} pdf={pdf} width={1600} /> : <PageLoading />}
@@ -68,6 +70,7 @@ function ScrollingPdfPage({ noteId, surfaceId, page, pdf, number, preload = fals
 }
 
 function StackedPage({ page, number, active, preload = false, onActivate, children }: { page: InkPage; number: number; active: boolean; preload?: boolean; onActivate: () => void; children: ReactNode }) {
+  const documentView = useDocumentView();
   const root = useRef<HTMLElement>(null);
   const [visited, setVisited] = useState(active || preload);
   if ((active || preload) && !visited) setVisited(true);
@@ -78,7 +81,7 @@ function StackedPage({ page, number, active, preload = false, onActivate, childr
     if (root.current) observer.observe(root.current);
     return () => observer.disconnect();
   }, []);
-  return <section ref={root} className="ink-stacked-page" data-pdf-page-id={page.id} aria-label={`Page ${number}`} onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
+  return <section ref={root} className="ink-stacked-page" style={{ width: page.paper.width * (documentView?.scale ?? 1) + 40 }} data-pdf-page-id={page.id} aria-label={`Page ${number}`} onPointerDownCapture={onActivate} onFocusCapture={onActivate}>
     <header>Page {number}{page.label ? ` · ${page.label}` : ""}</header>
     {visited || active ? children : <div style={{ aspectRatio: `${page.paper.width} / ${page.paper.height}` }}><PageLoading /></div>}
   </section>;
@@ -235,7 +238,7 @@ export default function InkEditor(props: Props) {
         {visible.filter(p => (!bookmarksOnly || p.bookmark) && `${p.label} ${p.searchText ?? ""}`.toLowerCase().includes(filter.toLowerCase())).map(p => <div className={`ink-page-card ${p.id === page?.id ? "is-active" : ""}`} draggable onDragStart={() => setDragged(p.id)} onDragOver={e => e.preventDefault()} onDrop={() => reorder(p)} key={p.id}><button className="ink-page-thumbnail" aria-label={`Open page ${visible.indexOf(p) + 1}: ${p.label || "Untitled"}`} onClick={() => select(p.id)}><PageThumbnail noteId={noteId} surfaceId={surface.id} page={p} pdf={pdf} /></button><div className="ink-page-card-caption"><button className="ink-page-name" onClick={() => select(p.id)}>{p.bookmark ? "★ " : ""}{visible.indexOf(p) + 1} {p.label}</button><button className="ink-page-more" aria-label={`Options for page ${visible.indexOf(p) + 1}: ${p.label || "Untitled"}`} title="Page options" onClick={() => { setPageMenuId(p.id); setPageName(p.label); }}>⋯</button></div></div>)}
         <button onClick={() => setTrash(!trash)}>Recently deleted ({pages.filter(p => p.deleted).length})</button>{trash && pages.filter(p => p.deleted).map(p => <button key={p.id} onClick={() => savePage({ ...p, deleted: false })}>Restore {p.label || "page"}</button>)}
       </aside>}
-      {page && continuousPdf ? <div className="ink-pdf-scroll" onScroll={event => trackScrollPage(event.currentTarget)} aria-label="PDF pages" tabIndex={0}>{visible.map((item, index) => <ScrollingPdfPage key={item.id} noteId={noteId} surfaceId={surface.id} page={item} pdf={pdf} number={index + 1} preload={index === visible.indexOf(page) || index === visible.indexOf(page) + 1} onAnnotate={() => { setPageId(item.id); changeAnnotationMode(true); }} />)}</div> : page ? <div className="ink-pdf-scroll" onScroll={event => trackScrollPage(event.currentTarget)} aria-label="Editing pages" tabIndex={0}>{visible.map((item, index) => <StackedPage key={item.id} page={item} number={index + 1} active={page.id === item.id} preload={index === visible.indexOf(page) + 1} onActivate={() => setPageId(item.id)}><InkPageEditor {...props} writingTools={writingTools} active={page.id === item.id} toolbarTarget={toolbarTarget} historyTarget={page.id === item.id ? historyTarget : null} viewControlsTarget={page.id === item.id ? viewControlsTarget : null} syncStatusTarget={page.id === item.id ? props.syncStatusTarget : null} onExport={() => { setSettingsOpen(false); setExportOpen(true); }} options={page.id === item.id && settingsOpen} setOptions={setSettingsOpen} fullscreen={fullscreen} toggleFull={toggleFull} pagesOpen={navigator} onTogglePages={() => setNavigator(value => !value)} page={item} pageNumber={index + 1} pdf={pdf} onPage={savePage} onMessage={setMessage} /></StackedPage>)}</div> : <div className="ink-empty"><h3>{loaded ? "A fresh page for your thoughts" : "Opening pages…"}</h3><button onClick={() => void addPage()}>Add handwritten page</button></div>}
+      {page && continuousPdf ? <InkDocumentViewport pages={visible} reading onScroll={trackScrollPage}>{visible.map((item, index) => <ScrollingPdfPage key={item.id} noteId={noteId} surfaceId={surface.id} page={item} pdf={pdf} number={index + 1} preload={index === visible.indexOf(page) || index === visible.indexOf(page) + 1} onAnnotate={() => { setPageId(item.id); changeAnnotationMode(true); }} />)}</InkDocumentViewport> : page ? <InkDocumentViewport pages={visible} reading={false} onScroll={trackScrollPage}>{visible.map((item, index) => <StackedPage key={item.id} page={item} number={index + 1} active={page.id === item.id} preload={index === visible.indexOf(page) + 1} onActivate={() => setPageId(item.id)}><InkPageEditor {...props} writingTools={writingTools} active={page.id === item.id} toolbarTarget={toolbarTarget} historyTarget={page.id === item.id ? historyTarget : null} viewControlsTarget={page.id === item.id ? viewControlsTarget : null} syncStatusTarget={page.id === item.id ? props.syncStatusTarget : null} onExport={() => { setSettingsOpen(false); setExportOpen(true); }} options={page.id === item.id && settingsOpen} setOptions={setSettingsOpen} fullscreen={fullscreen} toggleFull={toggleFull} pagesOpen={navigator} onTogglePages={() => setNavigator(value => !value)} page={item} pageNumber={index + 1} pdf={pdf} onPage={savePage} onMessage={setMessage} /></StackedPage>)}</InkDocumentViewport> : <div className="ink-empty"><h3>{loaded ? "A fresh page for your thoughts" : "Opening pages…"}</h3><button onClick={() => void addPage()}>Add handwritten page</button></div>}
     </div>
     {message && <div className="ink-status" role="status">{message}<button onClick={() => setMessage("")} aria-label="Dismiss">×</button></div>}
     {menuPage && !pageConfirmation && <div className="ink-modal-scrim" onClick={() => setPageMenuId(null)} onKeyDown={e => { if (e.key === "Escape") { e.stopPropagation(); setPageMenuId(null); } }}><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Page options" onClick={e => e.stopPropagation()}><div className="ink-dialog-title"><h2>Page options</h2><button aria-label="Close page options" onClick={() => setPageMenuId(null)}>×</button></div><form onSubmit={e => { e.preventDefault(); savePage({ ...menuPage, label: pageName.trim() }); setPageMenuId(null); }}><label>Page name<input autoFocus value={pageName} onChange={e => setPageName(e.target.value)} placeholder="Untitled page" /></label><div className="ink-actions"><button type="submit">Save name</button><button type="button" onClick={() => setPageConfirmation({ id: menuPage.id, action: "duplicate" })}>Duplicate</button><button type="button" onClick={() => setPageConfirmation({ id: menuPage.id, action: "delete" })}>Delete page</button></div></form></section></div>}

@@ -27,6 +27,7 @@ function fixture(initialPages = []) {
   const jsx = (type, props, key) => ({ type, props, key });
   const dependencies = {
     react,
+    "./ink-document-viewport": { default: "DocumentViewport", useDocumentView: () => ({ scale: 2 }) },
     "react/jsx-runtime": { jsx, jsxs: jsx, Fragment: "fragment" },
     "@/lib/ink-model": { newPage: (paper, order) => ({ id: "inserted", paper, order }), uid: () => "new" },
     "@/lib/ink-service": { saveInk: async () => {}, pagePath: () => "pages" },
@@ -84,7 +85,7 @@ test("adding a page inserts it between its neighbors immediately and retains the
   let tree = f.render(f.components.default, props);
   await find(tree, node => node.props?.["aria-label"] === "Add page").props.onClick();
   tree = f.render(f.components.default, props);
-  const stack = find(tree, node => node.props?.["aria-label"] === "Editing pages");
+  const stack = find(tree, node => node.type === "DocumentViewport" && node.props.reading === false);
   assert.deepEqual(stack.props.children.map(child => child.props.page.id), ["first", "inserted", "second"]);
   assert.equal(stack.props.children[1].props.active, true);
   assert.equal(stack.props.children[1].props.page.order, 500);
@@ -105,6 +106,14 @@ test("the next page preloads before it intersects the viewport in both modes", (
 test("only one page below the current editing page is requested ahead of visibility", () => {
   const f = fixture([0, 1, 2, 3].map(index => ({ id: `p${index}`, order: index * 1000, paper })));
   const tree = f.render(f.components.default, { userId: "u", noteId: "n", surface: { id: "s" }, preferences: { defaultPen: "pen" }, defaultPaper: paper });
-  const stack = find(tree, node => node.props?.["aria-label"] === "Editing pages");
+  const stack = find(tree, node => node.type === "DocumentViewport" && node.props.reading === false);
   assert.deepEqual(stack.props.children.map(child => child.props.preload), [false, true, false, false]);
+});
+
+
+test("every page uses the shared document scale, including unvisited pages", () => {
+  const reader = fixture(), editor = fixture();
+  const props = { page: { id: "p", paper }, number: 1, active: false };
+  assert.equal(reader.render(reader.components.ScrollingPdfPage, props).props.style.width, paper.width * 2);
+  assert.equal(editor.render(editor.components.StackedPage, props).props.style.width, paper.width * 2 + 40);
 });

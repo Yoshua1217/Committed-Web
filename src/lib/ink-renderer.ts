@@ -12,7 +12,7 @@ export function loadInkImage(url: string): Promise<HTMLImageElement> {
 }
 /** Add a tapered ribbon between circular cross sections to one filled path. */
 function fountainRibbon(ctx: CanvasRenderingContext2D, o: InkObject, a: Point, b: Point) {
-  const radius = (p: Point) => Math.max(.1, o.width * (p.pool ?? 1) / 2);
+  const radius = (p: Point) => Math.max(Number.EPSILON, o.width * (p.pool ?? 1) / 2);
   const ra = radius(a), rb = radius(b), dx = b.x - a.x, dy = b.y - a.y;
   const distance = Math.hypot(dx, dy);
   const circle = (p: Point, r: number) => { ctx.moveTo(p.x + r, p.y); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.closePath(); };
@@ -32,7 +32,7 @@ export function drawSegment(ctx: CanvasRenderingContext2D, o: InkObject, a: Poin
     ctx.fillStyle = o.color; ctx.beginPath(); fountainRibbon(ctx, o, a, b); ctx.fill(); return;
   }
   const pressure = o.style === "highlighter" ? 0 : o.pressure;
-  ctx.lineWidth = Math.max(.2, o.width * (1 - pressure * .65 + ((a.p + b.p) / 2) * pressure * 1.3));
+  ctx.lineWidth = Math.max(Number.EPSILON, o.width * (1 - pressure * .65 + ((a.p + b.p) / 2) * pressure * 1.3));
   ctx.strokeStyle = o.color; ctx.lineCap = "round"; ctx.lineJoin = "round";
   ctx.beginPath();
   if (a.x === b.x && a.y === b.y) { ctx.fillStyle = o.color; ctx.arc(b.x, b.y, ctx.lineWidth / 2, 0, Math.PI * 2); ctx.fill(); }

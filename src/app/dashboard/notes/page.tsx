@@ -348,6 +348,13 @@ export default function NotesPage() {
   const [newNoteMenu, setNewNoteMenu] = useState<{ folderId?: string | null } | null>(null);
   const [exportSurfaces, setExportSurfaces] = useState<{ noteId: string; surfaces: NoteSurface[] } | null>(null);
   const [typedSurfaceActive, setTypedSurfaceActive] = useState(true);
+  const [documentControlsCollapsed, setDocumentControlsCollapsed] = useState(false);
+  const collapseDocumentControlsRef = useRef<HTMLButtonElement>(null);
+  const restoreDocumentControlsRef = useRef<HTMLButtonElement>(null);
+  const toggleDocumentControls = (collapsed: boolean) => {
+    setDocumentControlsCollapsed(collapsed);
+    requestAnimationFrame(() => (collapsed ? restoreDocumentControlsRef : collapseDocumentControlsRef).current?.focus());
+  };
 
   const [workspaceHeaderTarget, setWorkspaceHeaderTarget] = useState<HTMLDivElement | null>(null);
   const [copyingWorkspace, setCopyingWorkspace] = useState(false);
@@ -1377,7 +1384,7 @@ export default function NotesPage() {
       <button type="button" className="notes-sidebar-resizer" aria-label="Resize notes navigation" title="Drag to resize sidebar" onPointerDown={beginSidebarResize} />
     </aside>
 
-    <main className="notes-editor-shell">
+    <main className={`notes-editor-shell${documentControlsCollapsed ? " is-document-controls-collapsed" : ""}`}>
       <header className="notes-editor-toolbar">
         <div className="notes-editor-toolbar-left">
           <button type="button" className="notes-mobile-sidebar" aria-label="Open notes navigation" onClick={() => { setSidebarCollapsed(false); setSidebarOpen(true); }}>{icon("dock_to_right", 20)}</button>
@@ -1410,10 +1417,12 @@ export default function NotesPage() {
             </div>}
           </div>
         </div>
+        {activeNote && <button type="button" ref={restoreDocumentControlsRef} className="notes-document-controls-restore" aria-label="Show document title and toolbar" title="Show document title and toolbar" aria-expanded={false} onClick={() => toggleDocumentControls(false)}>{icon("visibility", 20)}</button>}
       </header>
 
       {activeNote ? <div className={`notes-document-scroll${editorMode === "preview" ? " has-fast-scroll" : ""}`} id="notes-document-scroll" ref={documentScrollRef}>
         <article className={`notes-document${editorMode === "write" ? ` is-writing${formattedPreviewOpen ? "" : " is-formatted-preview-closed"}` : ""}`}>
+          <div className="notes-document-title-row">
           <textarea
             className="notes-title-input"
             rows={1}
@@ -1428,6 +1437,8 @@ export default function NotesPage() {
             placeholder="Untitled"
             aria-label="Note title"
           />
+          <button type="button" ref={collapseDocumentControlsRef} className="notes-document-controls-collapse" aria-label="Hide document title and toolbar" title="Hide document title and toolbar" aria-expanded={true} onClick={() => toggleDocumentControls(true)}>{icon("expand_less", 20)}</button>
+          </div>
           <div className="notes-document-meta">
             <span>{activeNote.content.trim() ? activeNote.content.trim().split(/\s+/).length : 0} words</span>
             <span>Edited {new Date(activeNote.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
+import { useDocumentView } from "./ink-document-viewport";
+import { useLayoutEffect, useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
 import { TbZoomIn, TbZoomOut } from "react-icons/tb";
 import { Capacitor } from "@capacitor/core";
 import { constrainInkView, fitInkView } from "@/lib/ink-viewport";
-import { InkObject, Paper, Pen, Point, eraseObjects, enhancePoints, fountainPool, fountainWidths, smoothFountainWidth, spreadFountainPool, withinInkHold, lassoObjects, objectBounds, recognizeHeldShape, shapePoints, transformObjects, uid } from "@/lib/ink-model";
+import { InkObject, Paper, Pen, Point, penAtZoom, eraseObjects, enhancePoints, fountainPool, fountainWidths, smoothFountainWidth, spreadFountainPool, withinInkHold, lassoObjects, objectBounds, recognizeHeldShape, shapePoints, transformObjects, uid } from "@/lib/ink-model";
 import { drawObject, drawObjects, drawPaper, drawSegment, loadInkImage } from "@/lib/ink-renderer";
 import { snapPdfHighlight, type PdfTextLine } from "@/lib/pdf-highlight";
 
@@ -24,6 +25,8 @@ type Props = {
 
 /** No React state, geometry scans, networking, or smoothing in the live ink path. */
 const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiRef) {
+  const documentView = useDocumentView();
+  const documentViewRef = useRef(documentView); documentViewRef.current = documentView;
   const viewportRef = useRef<HTMLDivElement>(null), pageRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLCanvasElement>(null), settledRef = useRef<HTMLCanvasElement>(null), liveRef = useRef<HTMLCanvasElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
@@ -40,13 +43,14 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     if (viewport && latest.current.continuous) {
       viewport.style.height = `${latest.current.paper.height * view.current.scale + 40}px`;
       view.current.y = 20;
-      view.current.x = Math.min(20, (viewport.clientWidth - latest.current.paper.width * view.current.scale) / 2);
+      view.current.x = documentViewRef.current ? 20 : Math.min(20, (viewport.clientWidth - latest.current.paper.width * view.current.scale) / 2);
     } else if (viewport) view.current = constrainInkView(view.current, latest.current.paper, { width: viewport.clientWidth, height: viewport.clientHeight });
     if (pageRef.current) pageRef.current.style.transform = `translate(${view.current.x}px, ${view.current.y}px) scale(${view.current.scale})`;
     refreshResolution.current();
   };
   const refit = () => {
     const viewport = viewportRef.current; if (!viewport || !viewport.clientWidth || !viewport.clientHeight) return;
+    if (documentViewRef.current) { view.current.scale = documentViewRef.current.scale; applyView(); setZoomLabel(Math.round(view.current.scale * 100)); return; }
     if (latest.current.continuous && fitMode.current !== "manual") {
       view.current = { x: 20, y: 20, scale: Math.max(.1, (viewport.clientWidth - 40) / latest.current.paper.width) };
       applyView(); setZoomLabel(Math.round(view.current.scale * 100)); return;
@@ -56,15 +60,17 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     view.current = fitInkView(latest.current.paper, { width: viewport.clientWidth, height: viewport.clientHeight }, mode);
     applyView(); setZoomLabel(Math.round(view.current.scale * 100));
   };
-  const fit = () => { fitMode.current = "page"; refit(); };
+  const fit = () => { if (documentViewRef.current) { documentViewRef.current.fit("page"); return; } fitMode.current = "page"; refit(); };
   const zoom = (factor: number) => {
+    if (documentViewRef.current) { documentViewRef.current.zoom(factor); return; }
     fitMode.current = "manual";
     const box = viewportRef.current?.getBoundingClientRect(); if (!box) return;
     const old = view.current, scale = Math.max(.1, Math.min(6, old.scale * factor));
     view.current = { scale, x: box.width / 2 - (box.width / 2 - old.x) * scale / old.scale, y: box.height / 2 - (box.height / 2 - old.y) * scale / old.scale };
     applyView(); setZoomLabel(Math.round(scale * 100));
   };
-  const fitWidth = () => { fitMode.current = "width"; refit(); };
+  const fitWidth = () => { if (documentViewRef.current) { documentViewRef.current.fit("width"); return; } fitMode.current = "width"; refit(); };
+  useLayoutEffect(() => { if (documentView) { view.current.scale = documentView.scale; applyView(); setZoomLabel(Math.round(documentView.scale * 100)); } }, [documentView?.scale]); // eslint-disable-line react-hooks/exhaustive-deps
   useImperativeHandle(apiRef, () => ({ fit, fitWidth, zoom }));
 
   useEffect(() => {
@@ -269,7 +275,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         else { polygon = [start]; options.onSelect([]); }
         return;
       }
-      const pen = options.pen;
+      const pen = penAtZoom(options.pen, view.current.scale);
       const widths = fountainWidths(pen);
       if (pen.style === "fountain") start.pool = widths.min / pen.width;
       stroke = { id: uid(), kind: "stroke", points: [start], color: pen.color, width: pen.width, ...(pen.style === "fountain" ? { minWidth: widths.min, maxWidth: widths.max } : {}), opacity: pen.opacity, style: pen.style, pressure: pen.pressure, order: Date.now() };
@@ -278,7 +284,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     };
     const move = (e: PointerEvent) => {
       if (e.pointerType === "pen" && active === null && cursorRef.current) {
-        const size = Math.max(3, (latest.current.tool === "eraser" || (e.buttons & 32 || e.buttons & 2) ? latest.current.eraserSize : latest.current.pen.width) * view.current.scale);
+        const size = Math.max(3, (latest.current.tool === "eraser" || (e.buttons & 32 || e.buttons & 2) ? latest.current.eraserSize * view.current.scale : latest.current.pen.width));
         const bounds = viewport.getBoundingClientRect(), cursor = cursorRef.current;
         cursor.style.display = "block"; cursor.style.width = `${size}px`; cursor.style.height = `${size}px`; cursor.style.transform = `translate(${e.clientX - bounds.left - size / 2}px, ${e.clientY - bounds.top - size / 2}px)`;
       }
@@ -297,6 +303,12 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         }
         const [a, b] = [...touches.values()], x = b ? (a.x + b.x) / 2 : a.x, y = b ? (a.y + b.y) / 2 : a.y;
         const scale = b && navigation.distance ? Math.max(.1, Math.min(6, navigation.view.scale * Math.hypot(a.x - b.x, a.y - b.y) / navigation.distance)) : navigation.view.scale;
+        if (documentViewRef.current && b && navigation.distance) {
+          const scroll = viewport.closest<HTMLElement>(".ink-pdf-scroll");
+          if (scroll) { scroll.scrollLeft += (previousTouch.x - e.clientX) / 2; scroll.scrollTop += (previousTouch.y - e.clientY) / 2; }
+          documentViewRef.current.zoom(scale / view.current.scale, x, y);
+          return;
+        }
         if (b && navigation.distance) fitMode.current = "manual";
         view.current = { scale, x: x - rect.left - (navigation.x - rect.left - navigation.view.x) * scale / navigation.view.scale, y: y - rect.top - (navigation.y - rect.top - navigation.view.y) * scale / navigation.view.scale }; applyView(); return;
       }
@@ -327,7 +339,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       if (stroke.points.length >= 4000) { const part = stroke; options.onChange([...latest.current.objects, part]); drawObject(ctx, part); clear(); stroke = { ...part, id: uid(), points: [{ ...part.points.at(-1)! }], order: Date.now() }; holdAnchor = null; trackHold(stroke.points[0]); }
 
     };
-    const wheel = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoom(Math.exp(-e.deltaY * .005)); } else if (!latest.current.continuous) { e.preventDefault(); view.current.x -= e.deltaX; view.current.y -= e.deltaY; applyView(); } };
+    const wheel = (e: WheelEvent) => { if (documentViewRef.current) return; if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoom(Math.exp(-e.deltaY * .005)); } else if (!latest.current.continuous) { e.preventDefault(); view.current.x -= e.deltaX; view.current.y -= e.deltaY; applyView(); } };
     const rawMove = (event: Event) => { const pointer = event as PointerEvent; if (pointer.pointerType === "pen") move(pointer); };
     const leave = () => { if (cursorRef.current) cursorRef.current.style.display = "none"; };
     viewport.addEventListener("pointerleave", leave);

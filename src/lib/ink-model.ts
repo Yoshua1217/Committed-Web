@@ -146,9 +146,16 @@ export function fountainPool(elapsed: number) {
 }
 
 export function fountainWidths(pen: { width: number; minWidth?: number; maxWidth?: number }) {
-  const min = Math.max(.5, pen.minWidth ?? pen.width * .4);
+  const min = Math.max(Number.EPSILON, pen.minWidth ?? Math.max(.5, pen.width * .4));
   return { min, max: Math.max(min, pen.maxWidth ?? pen.width * 3) };
 }
+/** Convert screen-sized presets once at pen-down; saved ink keeps document widths. */
+export function penAtZoom(pen: Pen, scale: number): Pen {
+  const zoom = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const widths = fountainWidths(pen);
+  return { ...pen, width: pen.width / zoom, ...(pen.style === "fountain" ? { minWidth: widths.min / zoom, maxWidth: widths.max / zoom } : {}) };
+}
+
 /** Page pixels per millisecond: speed stays consistent when replayed or zoomed. */
 export function fountainSpeedWidth(pen: { width: number; minWidth?: number; maxWidth?: number }, a: Point, b: Point) {
   const { min, max } = fountainWidths(pen);

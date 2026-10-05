@@ -117,3 +117,29 @@ test("fountain smoothing limits sudden speed changes and tapers held buildup", (
   assert.equal(points[0].pool, .5);
   for (let i = 1; i < points.length; i++) assert.ok(Math.abs(points[i].pool - points[i - 1].pool) * 2 <= .150001);
 });
+
+
+test("new pen strokes keep screen width across zoom while saved widths stay fixed", () => {
+  const { penAtZoom, STARTER_PENS } = load("ink-model");
+  for (const style of ["pen", "pencil", "highlighter"]) {
+    const preset = { ...STARTER_PENS[0], style, width: 3 };
+    for (const scale of [.1, .5, 1, 2, 6]) {
+      const drawingPen = penAtZoom(preset, scale);
+      assert.equal(drawingPen.width * scale, 3);
+      const saved = { ...stroke(), width: drawingPen.width };
+      penAtZoom(preset, 4);
+      assert.equal(saved.width, 3 / scale);
+      assert.equal(preset.width, 3);
+    }
+  }
+});
+
+test("fountain pen bounds scale with zoom without clamping fine strokes", () => {
+  const { penAtZoom, fountainWidths, STARTER_PENS } = load("ink-model");
+  const preset = { ...STARTER_PENS[0], style: "fountain", width: 2, minWidth: .5, maxWidth: 6 };
+  for (const scale of [.5, 1, 2, 6]) {
+    const pen = penAtZoom(preset, scale), bounds = fountainWidths(pen);
+    assert.equal(bounds.min * scale, .5);
+    assert.equal(bounds.max * scale, 6);
+  }
+});

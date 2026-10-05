@@ -228,7 +228,7 @@
 .course-row > span:first-child { width: 10px; height: 10px; border-radius: 50%; }
 .course-row small { margin-left: auto; font-size: 10px; color: var(--secondary); }
 .notes-document:has(.note-workspace) { width: 100% !important; padding: 24px 24px 60px; }
-.notes-document:has(.note-workspace) > .notes-title-input { font-size: 28px; }
+.notes-document:has(.note-workspace) > .notes-document-title-row .notes-title-input { font-size: 28px; }
 .notes-document:has(.note-workspace) > .notes-document-meta { margin-bottom: 16px; }
 .note-workspace:not(.has-split) .ink-main-typed { width: 100%; max-width: none; margin: 0; }
 .has-split .notes-compose-grid { grid-template-columns: 1fr; }
@@ -242,10 +242,24 @@
 .ink-new-note-options small { color: var(--secondary); margin-top: 5px; }
 @media (max-width: 900px) { .ink-workspace-panels { flex-direction: column; } .ink-editor-body { min-height: 520px; } .notes-document:has(.note-workspace) { padding: 16px 8px 50px; } .ink-page-navigator { width: 125px; } }
 .notes-document:has(.ink-editor) { max-width: none; padding: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
-.notes-document:has(.ink-editor) > .notes-title-input { width: calc(100% - 32px); margin: 16px 16px 0; }
+.notes-document-title-row { display: flex; align-items: flex-start; gap: 12px; }
+.notes-document-title-row .notes-title-input { flex: 1; min-width: 0; }
+.notes-document:has(.ink-editor) > .notes-document-title-row { margin: 16px 16px 0; }
 .notes-document:has(.ink-editor) > .notes-document-meta { margin: 0 16px 12px; }
 .notes-document:has(.ink-editor) > .note-workspace { border-top: 0; }
 .notes-document:has(.ink-editor) .ink-workspace-panels { gap: 1px; background: var(--border); }
+.notes-editor-toolbar { position: relative; z-index: 5; }
+.notes-document-controls-collapse, .notes-document-controls-restore { display: none; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--primary); cursor: pointer; }
+.notes-document-controls-collapse:hover, .notes-document-controls-restore:hover { background: color-mix(in srgb, var(--surface) 90%, var(--primary) 10%); }
+.notes-document-controls-collapse:focus-visible, .notes-document-controls-restore:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+.notes-editor-shell:has(.ink-editor) .notes-document-controls-collapse { display: inline-flex; }
+.notes-document-controls-restore { position: absolute; right: 18px; bottom: 0; transform: translateY(100%); border-top: 0; border-radius: 0 0 6px 6px; }
+/* Hide the chrome without unmounting page editors or their toolbar portals. */
+.notes-editor-shell.is-document-controls-collapsed:has(.ink-editor) .notes-document > .notes-document-title-row,
+.notes-editor-shell.is-document-controls-collapsed:has(.ink-editor) .notes-document > .notes-document-meta,
+.notes-editor-shell.is-document-controls-collapsed .ink-editor:not(.ink-focus-mode) > .ink-page-controls,
+.notes-editor-shell.is-document-controls-collapsed .ink-editor:not(.ink-focus-mode) > .ink-shared-tools { display: none; }
+.notes-editor-shell.is-document-controls-collapsed:has(.ink-editor) .notes-document-controls-restore { display: inline-flex; }
 @media (pointer: coarse) { .ink-ui button { min-height: 42px; } .ink-toolbar button { min-width: 42px; } .ink-dialog { padding: 20px; } }
 @media print { .ink-tabbar, .ink-toolbar, .ink-page-controls, .ink-view-controls { display: none; } }
 
@@ -255,3 +269,11 @@
 .ink-stacked-page > header { padding: 10px 0; color: #fff; }
 .ink-stacked-page .ink-page-editor, .ink-focus-mode .ink-stacked-page .ink-page-editor { overflow: visible; }
 .ink-stacked-page .ink-viewport, .ink-focus-mode .ink-stacked-page .ink-viewport { min-height: 480px; flex: none; overscroll-behavior: auto; }
+
+/* The document owns overflow; enlarged pages must contribute their full width. */
+.ink-document-viewer { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.ink-document-viewer .ink-pdf-scroll { scrollbar-width: none; touch-action: none; overflow-anchor: none; overscroll-behavior: contain; }
+.ink-document-viewer .ink-pdf-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.ink-document-pages { min-width: 100%; }
+.ink-document-pages .ink-stacked-page, .ink-document-pages .ink-scrolling-page { max-width: none; }
+.ink-document-pages .ink-stacked-page .ink-viewport { min-height: 0; }
