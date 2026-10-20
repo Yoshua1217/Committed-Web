@@ -12,26 +12,55 @@ export default function InkDocumentViewport({ pages, reading, onScroll, children
   const root = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const currentScale = useRef(1);
+  const zoomFrame = useRef<number | null>(null);
+  const pendingZoom = useRef<{ scale: number; x?: number; y?: number } | null>(null);
+  const scrollFrame = useRef<number | null>(null);
+  const onScrollRef = useRef(onScroll);
+  useLayoutEffect(() => { onScrollRef.current = onScroll; });
+  const trackScroll = () => {
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = null; if (root.current) onScrollRef.current(root.current); });
+  };
   const mode = useRef<"width" | "page" | "manual">("width");
   const anchor = useRef<{ x: number; y: number; left: number; top: number; ratio: number; page?: HTMLElement; pageX?: number; pageY?: number } | null>(null);
   const width = Math.max(1, ...pages.map(page => page.paper.width));
   const height = Math.max(1, ...pages.map(page => page.paper.height));
-  const applyScale = (next: number, x?: number, y?: number) => {
+  const commitScale = (next: number, x?: number, y?: number) => {
     const element = root.current;
     if (!element) return;
     next = Math.max(.1, Math.min(6, next));
     const box = element.getBoundingClientRect();
     const ax = x === undefined ? element.clientWidth / 2 : x - box.left;
     const ay = y === undefined ? element.clientHeight / 2 : y - box.top;
-    anchor.current = { x: ax, y: ay, left: element.scrollLeft, top: element.scrollTop, ratio: next / currentScale.current };
+    anchor.current = { x: ax, y: ay, left: element.scrollLeft, top: element.scrollTop, ratio: next / scale };
     const page = Array.from(element.querySelectorAll<HTMLElement>("[data-pdf-page-id]")).find(item => item.getBoundingClientRect().bottom > box.top + ay);
     if (page) {
       const bounds = page.getBoundingClientRect();
       Object.assign(anchor.current, { page, pageX: (box.left + ax - bounds.left) / bounds.width, pageY: (box.top + ay - bounds.top) / bounds.height });
     }
-    currentScale.current = next;
     setScale(next);
   };
+  const applyScale = (next: number, x?: number, y?: number) => {
+    next = Math.max(.1, Math.min(6, next));
+    currentScale.current = next;
+    pendingZoom.current = { scale: next, x, y };
+    if (zoomFrame.current !== null) return;
+    // Input can arrive much faster than the display. Read layout and update the
+    // page stack once per frame, retaining every wheel/pinch scale increment.
+    zoomFrame.current = requestAnimationFrame(() => {
+      zoomFrame.current = null;
+      const pending = pendingZoom.current;
+      pendingZoom.current = null;
+      if (pending) commitScale(pending.scale, pending.x, pending.y);
+    });
+  };
+  useLayoutEffect(() => () => {
+    if (zoomFrame.current !== null) cancelAnimationFrame(zoomFrame.current);
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
+    zoomFrame.current = null;
+    pendingZoom.current = null;
+  }, []);
   const fit = (value: "width" | "page") => {
     mode.current = value;
     const element = root.current;
@@ -69,7 +98,7 @@ export default function InkDocumentViewport({ pages, reading, onScroll, children
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   return <DocumentViewContext.Provider value={{ scale, zoom, fit }}><div className="ink-document-viewer">
     {reading && <div className="ink-view-controls"><button onClick={() => zoom(.8)} aria-label="Zoom out">−</button><span>{Math.round(scale * 100)}%</span><button onClick={() => zoom(1.25)} aria-label="Zoom in">+</button><button onClick={() => fit("width")}>Fit width</button><button onClick={() => fit("page")}>Fit page</button></div>}
-    <div ref={root} className="ink-pdf-scroll" tabIndex={0} aria-label={reading ? "PDF pages" : "Editing pages"} onScroll={event => onScroll(event.currentTarget)}
+    <div ref={root} className="ink-pdf-scroll" tabIndex={0} aria-label={reading ? "PDF pages" : "Editing pages"} onScroll={trackScroll}
       onPointerDown={event => {
         if (!reading || (event.target as HTMLElement).closest("button") || (event.pointerType === "mouse" && event.button !== 0)) return;
         event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);

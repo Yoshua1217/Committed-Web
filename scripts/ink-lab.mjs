@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from "n
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 const root = new URL("../", import.meta.url);
-const fixture = new URL("tests/fixtures/ink-lab.tsx", root);
+const fixture = new URL(process.argv.includes("--performance") ? "tests/fixtures/ink-performance.tsx" : "tests/fixtures/ink-lab.tsx", root);
 const route = new URL("src/app/ink-lab/page.tsx", root);
 if (existsSync(route) && readFileSync(route, "utf8") !== readFileSync(fixture, "utf8")) throw new Error("The ink-lab route has local edits. Keep them before starting the fixture.");
 mkdirSync(new URL("src/app/ink-lab/", root), { recursive: true });

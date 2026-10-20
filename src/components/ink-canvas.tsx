@@ -4,7 +4,7 @@ import { useDocumentView } from "./ink-document-viewport";
 import { useLayoutEffect, useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
 import { TbZoomIn, TbZoomOut } from "react-icons/tb";
 import { Capacitor } from "@capacitor/core";
-import { constrainInkView, fitInkView } from "@/lib/ink-viewport";
+import { constrainInkView, fitInkView, inkRasterSize, inkRasterRegion, inkRegionCovers } from "@/lib/ink-viewport";
 import { InkObject, Paper, Pen, Point, penAtZoom, eraseObjects, enhancePoints, fountainPool, fountainWidths, smoothFountainWidth, spreadFountainPool, withinInkHold, lassoObjects, objectBounds, recognizeHeldShape, shapePoints, transformObjects, uid } from "@/lib/ink-model";
 import { drawObject, drawObjects, drawPaper, drawSegment, loadInkImage } from "@/lib/ink-renderer";
 import { snapPdfHighlight, type PdfTextLine } from "@/lib/pdf-highlight";
@@ -36,7 +36,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
   const [zoomLabel, setZoomLabel] = useState(100);
   const [zoomOpen, setZoomOpen] = useState(false);
   const gestureActive = useRef(false);
-  const refreshResolution = useRef<() => void>(() => {});
+  const refreshResolution = useRef<(immediate?: boolean) => void>(() => {});
   const fitMode = useRef<"auto" | "page" | "width" | "manual">("auto");
   const applyView = () => {
     const viewport = viewportRef.current;
@@ -78,31 +78,60 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     if (!viewport || !paper || !settled || !live) return;
     let disposed = false;
     const isMounted = () => !disposed && viewportRef.current === viewport && viewport.isConnected;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pixels = inkRasterSize(props.paper, window.devicePixelRatio || 1);
     for (const canvas of [paper, settled, live]) {
-      canvas.width = Math.round(props.paper.width * dpr); canvas.height = Math.round(props.paper.height * dpr);
+      canvas.width = pixels.width; canvas.height = pixels.height;
+      canvas.style.width = "100%"; canvas.style.height = "100%"; canvas.style.left = "0px"; canvas.style.top = "0px";
       // Desktop GPU overlays can render stacked desynchronized canvases as black.
       // Only native live ink needs that path; paper and saved ink use the compositor.
-      canvas.getContext("2d", { alpha: canvas !== paper, desynchronized: canvas === live && Capacitor.isNativePlatform() })!.scale(dpr, dpr);
+      canvas.getContext("2d", { alpha: canvas !== paper, desynchronized: canvas === live && Capacitor.isNativePlatform() })!.setTransform(pixels.width / props.paper.width, 0, 0, pixels.height / props.paper.height, 0, 0);
     }
     drawPaper(paper.getContext("2d")!, props.paper);
-    let resolutionTimer: ReturnType<typeof setTimeout>;
-    const resizeForZoom = () => {
-      if (!isMounted()) return;
-      if (gestureActive.current) { resolutionTimer = setTimeout(resizeForZoom, 100); return; }
-      const { width, height } = latest.current.paper;
-      // Re-rasterize vector ink at its displayed size, within a per-layer memory budget.
-      const ratio = Math.min((window.devicePixelRatio || 1) * Math.max(1, view.current.scale), Math.sqrt(32_000_000 / (width * height)), 16384 / Math.max(width, height));
-      const pixelWidth = Math.max(1, Math.round(width * ratio)), pixelHeight = Math.max(1, Math.round(height * ratio));
-      if (settled.width === pixelWidth && settled.height === pixelHeight) return;
+    const scroll = viewport.closest<HTMLElement>(".ink-pdf-scroll");
+    let resolutionTimer: ReturnType<typeof setTimeout> | undefined, resolutionFrame: number | null = null;
+    let region: ReturnType<typeof inkRasterRegion> = null;
+    let regionScale = 0, regionDpr = 0;
+    const resizeVisibleInk = () => {
+      resolutionFrame = null;
+      if (!isMounted() || gestureActive.current || !pageRef.current) return;
+      const bounds = viewport.getBoundingClientRect(), scrollBounds = scroll?.getBoundingClientRect();
+      const clip = {
+        left: Math.max(0, bounds.left, scrollBounds?.left ?? 0), top: Math.max(0, bounds.top, scrollBounds?.top ?? 0),
+        right: Math.min(window.innerWidth, bounds.right, scrollBounds?.right ?? window.innerWidth), bottom: Math.min(window.innerHeight, bounds.bottom, scrollBounds?.bottom ?? window.innerHeight),
+      };
+      if (clip.right <= clip.left || clip.bottom <= clip.top) return;
+      const pageBounds = pageRef.current.getBoundingClientRect(), scale = view.current.scale, dpr = window.devicePixelRatio || 1;
+      if (region && regionScale === scale && regionDpr === dpr && inkRegionCovers(region, latest.current.paper, scale, pageBounds, clip)) return;
+      const next = inkRasterRegion(latest.current.paper, scale, dpr, pageBounds, clip);
+      if (!next || (region && Object.keys(next).every(key => next[key as keyof typeof next] === region![key as keyof typeof next]))) return;
+      region = next;
+      regionScale = scale; regionDpr = dpr;
       for (const canvas of [paper, settled, live]) {
-        canvas.width = pixelWidth; canvas.height = pixelHeight;
-        canvas.getContext("2d")!.setTransform(pixelWidth / width, 0, 0, pixelHeight / height, 0, 0);
+        // The page itself still scrolls at its full size; only the buffers
+        // cover the visible portion. Never enlarge them to the zoomed page size.
+        if (canvas.width !== next.pixelWidth) canvas.width = next.pixelWidth;
+        if (canvas.height !== next.pixelHeight) canvas.height = next.pixelHeight;
+        canvas.style.width = `${next.width}px`; canvas.style.height = `${next.height}px`;
+        canvas.style.left = `${next.x}px`; canvas.style.top = `${next.y}px`;
+        const rx = next.pixelWidth / next.width, ry = next.pixelHeight / next.height;
+        const context = canvas.getContext("2d")!;
+        context.setTransform(1, 0, 0, 1, 0, 0); context.clearRect(0, 0, canvas.width, canvas.height);
+        context.setTransform(rx, 0, 0, ry, -next.x * rx, -next.y * ry);
       }
       drawPaper(paper.getContext("2d")!, latest.current.paper);
       repaint.current(true);
     };
-    refreshResolution.current = () => { clearTimeout(resolutionTimer); if (isMounted()) resolutionTimer = setTimeout(resizeForZoom, 100); };
+    const scheduleRegion = () => { if (resolutionFrame === null) resolutionFrame = requestAnimationFrame(resizeVisibleInk); };
+    refreshResolution.current = (immediate = false) => {
+      clearTimeout(resolutionTimer);
+      resolutionTimer = undefined;
+      if (immediate) { if (resolutionFrame !== null) cancelAnimationFrame(resolutionFrame); resizeVisibleInk(); }
+      else resolutionTimer = setTimeout(() => { resolutionTimer = undefined; scheduleRegion(); }, 120);
+    };
+    // Scroll crops run once per display frame. Zoom crops wait for navigation
+    // to settle, and no canvas is resized while a pen is touching the page.
+    const scrollRegion = () => { if (resolutionTimer === undefined) scheduleRegion(); };
+    window.addEventListener("scroll", scrollRegion, { passive: true, capture: true });
     repaint.current(true); refit();
     let lastWidth = viewport.clientWidth, lastHeight = viewport.clientHeight;
     let portrait = window.innerHeight > window.innerWidth;
@@ -110,6 +139,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       if (!isMounted()) return;
       const nextPortrait = window.innerHeight > window.innerWidth;
       if (nextPortrait !== portrait) { portrait = nextPortrait; fitMode.current = "auto"; refit(); }
+      refreshResolution.current();
     };
     window.addEventListener("resize", orientationResize);
     const observer = new ResizeObserver(() => {
@@ -119,7 +149,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       if (width > 0 && height > 0 && (Math.abs(width - lastWidth) > 1 || Math.abs(height - lastHeight) > 1)) { lastWidth = width; lastHeight = height; refit(); }
     });
     observer.observe(viewport);
-    return () => { disposed = true; observer.disconnect(); window.removeEventListener("resize", orientationResize); clearTimeout(resolutionTimer); refreshResolution.current = () => {}; };
+    return () => { disposed = true; observer.disconnect(); window.removeEventListener("resize", orientationResize); window.removeEventListener("scroll", scrollRegion, true); clearTimeout(resolutionTimer); if (resolutionFrame !== null) cancelAnimationFrame(resolutionFrame); refreshResolution.current = () => {}; };
     // Resizing a page resets fit; object edits must never clear the live canvas.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.paper.width, props.paper.height]);
@@ -192,6 +222,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         const result = lassoObjects(latest.current.objects, polygon); options.onChange(result.objects); options.onSelect(result.selected); paint(result.objects, result.selected);
       } else if (moving || erasing) { options.onChange(working); }
       active = null; stroke = null; polygon = []; moving = false; resizing = false; erasing = false; start = null; gestureActive.current = false; clear();
+      refreshResolution.current();
       if (pointerIsPen) lastPenTime = performance.now(); pointerIsPen = false;
     };
     const trackHold = (point: Point) => {
@@ -225,6 +256,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       setZoomOpen(false);
       if (e.button !== 0 && e.pointerType !== "pen") return;
       const options = latest.current; rect = viewport.getBoundingClientRect();
+      refreshResolution.current(true);
       viewport.closest<HTMLElement>(".ink-page-editor")?.focus({ preventScroll: true });
       if (e.pointerType === "touch" && (pointerIsPen || performance.now() - lastPenTime < 350 || e.width > 55 || e.height > 55)) return;
       if (e.pointerType === "touch" && options.touch === "draw" && active !== null && !pointerIsPen) {
@@ -306,7 +338,9 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         if (documentViewRef.current && b && navigation.distance) {
           const scroll = viewport.closest<HTMLElement>(".ink-pdf-scroll");
           if (scroll) { scroll.scrollLeft += (previousTouch.x - e.clientX) / 2; scroll.scrollTop += (previousTouch.y - e.clientY) / 2; }
-          documentViewRef.current.zoom(scale / view.current.scale, x, y);
+          const other = [...touches.entries()].find(([id]) => id !== e.pointerId)?.[1];
+          const before = other ? Math.hypot(previousTouch.x - other.x, previousTouch.y - other.y) : 0;
+          if (before) documentViewRef.current.zoom(Math.hypot(a.x - b.x, a.y - b.y) / before, x, y);
           return;
         }
         if (b && navigation.distance) fitMode.current = "manual";

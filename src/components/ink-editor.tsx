@@ -1,7 +1,7 @@
 "use client";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { preserveInkReadingPosition, preserveInkScroll } from "@/lib/ink-scroll";
+import { inkPageAtViewport, preserveInkReadingPosition, preserveInkScroll } from "@/lib/ink-scroll";
 import { TbArrowLeft, TbArrowRight, TbEraser, TbGeometry, TbHandMove, TbLasso, TbPhoto, TbEyeOff, TbSettings, TbLayoutSidebarLeftExpand, TbBookmark, TbBookmarkFilled, TbTemplate, TbFileExport, TbMaximize, TbMinimize, TbZoomIn, TbZoomOut, TbSearch, TbBriefcase2 } from "react-icons/tb";
 import { createPortal } from "react-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
@@ -148,9 +148,7 @@ export default function InkEditor(props: Props) {
     return stop;
   }, [continuousPdf]);
   const trackScrollPage = (container: HTMLDivElement) => {
-    const top = Math.max(0, container.getBoundingClientRect().top) + 80;
-    const elements = Array.from(container.querySelectorAll<HTMLElement>("[data-pdf-page-id]"));
-    const current = elements.find(element => element.getBoundingClientRect().bottom > top);
+    const current = inkPageAtViewport(container);
     if (current?.dataset.pdfPageId) setPageId(current.dataset.pdfPageId);
   };
 

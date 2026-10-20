@@ -7,6 +7,7 @@
     "test": "node --test tests/*.test.mjs",
     "dev": "next dev",
     "dev:ink-lab": "node scripts/ink-lab.mjs",
+    "dev:ink-performance": "node scripts/ink-lab.mjs --performance",
     "test:ink-rules": "firebase emulators:exec --only firestore,storage --project demo-ink-workspace --config firebase.ink-tests.json \"node --test tests/ink.rules.mjs tests/ink-storage.rules.mjs\"",
     "build": "next build",
     "android:sync": "npm run build && npx cap sync android",

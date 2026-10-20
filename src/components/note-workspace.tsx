@@ -9,13 +9,16 @@ import NotesMarkdown from "./notes-markdown";
 import { openPdf } from "@/lib/note-pdf";
 import "./note-workspace.css";
 import { readSurfaceDrafts, storeSurfaceDrafts, SurfaceDraft } from "@/lib/notes-local-drafts";
+import { bindInkTabScroll } from "@/lib/ink-scroll";
 
 const InkEditor = dynamic(() => import("./ink-editor"), { ssr: false, loading: () => <div className="ink-empty">Opening writing tools…</div> });
 const MAIN: NoteSurface = { id: "main", kind: "typed", name: "Notes", order: -1 };
 export default function NoteWorkspace({ note, calendarId, children, onInsert, onSurfaceChange, onExportSurfaces, headerTarget }: { onExportSurfaces?: (value: { noteId: string; surfaces: NoteSurface[] }) => void; headerTarget?: HTMLDivElement | null; note: MarkdownNote; calendarId?: string | null; children: ReactNode; onInsert: (markdown: string) => void; onSurfaceChange: (isTyped: boolean) => void }) {
 
   const [syncStatusTarget, setSyncStatusTarget] = useState<HTMLDivElement | null>(null);
-  const [surfaces, setSurfaces] = useState<NoteSurface[]>([]), [active, setActive] = useState("main"), [second, setSecond] = useState("");
+  const tabbarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (tabbarRef.current) return bindInkTabScroll(tabbarRef.current); }, [headerTarget]);
+  const [surfaces, setSurfaces] = useState<NoteSurface[]>([]), [active, setActive] = useState(note.initialSurface === "ink" ? "handwriting" : "main"), [second, setSecond] = useState("");
   const [preferences, setPreferences] = useState<InkPreferences>(DEFAULT_INK_PREFERENCES), [courses, setCourses] = useState<Course[]>([]);
   const [loaded, setLoaded] = useState(false), [menu, setMenu] = useState(false), [manage, setManage] = useState<string | null>(null), [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false), [query, setQuery] = useState(""), [searchOpen, setSearchOpen] = useState(false), [results, setResults] = useState<{ surfaceId: string; pageId?: string; label: string }[]>([]);
@@ -38,11 +41,22 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
   }, [note.id, note.userId, note.initialSurface, fail]);
   useEffect(() => { if (loaded) onExportSurfaces?.({ noteId: note.id, surfaces }); }, [loaded, note.id, surfaces, onExportSurfaces]);
   const course = courseForNotebook(courses, note.notebookId, calendarId), paper = course?.paper ?? preferences.paper;
-  const all = [surfaces.find(s => s.id === "main") ?? MAIN, ...surfaces.filter(s => s.id !== "main")].sort((a, b) => a.order - b.order);
+  // Older notes were always marked typed, even when their only content was a
+  // PDF or handwriting. Do not recreate their empty, implicit text page.
+  const hasDocument = surfaces.some(s => s.kind !== "typed" && !s.hidden && !s.deleted);
+  const hasMain = Boolean(note.content.trim()) || surfaces.some(s => s.id === "main") || (!hasDocument && note.initialSurface !== "ink" && note.initialSurface !== "pdf");
+  const all = [...(hasMain ? [surfaces.find(s => s.id === "main") ?? MAIN] : []), ...surfaces.filter(s => s.id !== "main")].sort((a, b) => a.order - b.order);
   const tabs = all.filter(s => !s.hidden && !s.deleted);
-  const activeTab = tabs.find(s => s.id === active) ?? tabs[0] ?? MAIN;
-  useEffect(() => { onSurfaceChange(activeTab.id === "main" && !second); }, [activeTab.id, second, onSurfaceChange]);
-  const select = (id: string) => { if (id === second) setSecond(activeTab.id); history.current.push(activeTab.id); setHistoryCount(history.current.length); setActive(id); localStorage.setItem(`ink-surface:${note.userId}:${note.id}`, id); };
+  const activeTab = tabs.find(s => s.id === active) ?? tabs.find(s => s.kind === note.initialSurface) ?? tabs[0];
+  useEffect(() => {
+    const strip = tabbarRef.current, tab = strip?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!strip || !tab) return;
+    const outer = strip.getBoundingClientRect(), inner = tab.getBoundingClientRect();
+    const delta = inner.left < outer.left ? inner.left - outer.left : inner.right > outer.right ? inner.right - outer.right : 0;
+    if (delta) strip.scrollBy({ left: delta, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  }, [activeTab?.id, headerTarget]);
+  useEffect(() => { onSurfaceChange(activeTab?.id === "main" && !second); }, [activeTab?.id, second, onSurfaceChange]);
+  const select = (id: string) => { if (id === second) setSecond(activeTab?.id ?? ""); if (activeTab && id !== activeTab?.id) history.current.push(activeTab?.id); setHistoryCount(history.current.length); setActive(id); localStorage.setItem(`ink-surface:${note.userId}:${note.id}`, id); };
   const saveSurface = (surface: NoteSurface) => {
     const revision = ++surfaceRevision.current; pendingSurfaces.current.set(surface.id, { surface, revision });
     if (!storeSurfaceDrafts(note.userId, note.id, [...pendingSurfaces.current.values()])) setMessage("Device draft storage is full. Keep this tab open until syncing completes.");
@@ -50,7 +64,7 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
     void saveInk(surfacePath(note.id), surface).then(() => { if (pendingSurfaces.current.get(surface.id)?.revision === revision) pendingSurfaces.current.delete(surface.id); storeSurfaceDrafts(note.userId, note.id, [...pendingSurfaces.current.values()]); }).catch(fail);
   };
   const add = async (kind: "typed" | "ink", fixedId?: string) => {
-    const surface: NoteSurface = { id: fixedId ?? uid(), kind, name: kind === "typed" ? "Typed notes" : "Handwriting", order: Date.now(), ...(kind === "typed" ? { content: "" } : {}) };
+    const surface: NoteSurface = kind === "typed" && !hasMain ? { ...MAIN } : { id: fixedId ?? uid(), kind, name: kind === "typed" ? "Typed notes" : "Handwriting", order: Date.now(), ...(kind === "typed" ? { content: "" } : {}) };
     if (kind === "ink") void saveInk(pagePath(note.id, surface.id), { ...newPage(paper, 0), id: fixedId ? "first-page" : uid() }).catch(fail);
     // Firestore queues these writes locally. Opening a fresh tab must not wait
     // for the network acknowledgement, especially during an offline lecture.
@@ -60,7 +74,6 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
     if (!loaded || !preferencesLoaded || !coursesLoaded || initialized.current) return;
     initialized.current = true;
     if (note.initialSurface === "ink" && !surfaces.some(s => s.id === "handwriting")) void add("ink", "handwriting").catch(fail);
-    if (note.initialSurface === "pdf" && !surfaces.some(s => s.kind === "pdf")) setMenu(true);
     // Bootstrap exactly once; incoming snapshots must never create more pages.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, preferencesLoaded, coursesLoaded]);
@@ -85,7 +98,7 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
   const search = async () => {
     setResults([]); if (!query.trim()) return;
     const needle = query.toLowerCase(), found: typeof results = [];
-    if (`${note.title} ${note.content}`.toLowerCase().includes(needle)) found.push({ surfaceId: "main", label: "Notes" });
+    if (hasMain && `${note.title} ${note.content}`.toLowerCase().includes(needle)) found.push({ surfaceId: "main", label: "Notes" });
     const { readInk } = await import("@/lib/ink-service");
     for (const tab of all.filter(s => !s.deleted)) {
       if (tab.id !== "main" && `${tab.name} ${tab.content ?? ""}`.toLowerCase().includes(needle)) found.push({ surfaceId: tab.id, label: tab.name });
@@ -93,17 +106,17 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
     }
     setResults(found); if (!found.length) setMessage("No matches in typed text, page labels, or indexed PDF pages.");
   };
-  const sendToText = () => { if (send === null) return; if (sendTarget === "main") onInsert(send); else { const target = all.find(s => s.id === sendTarget); if (target) saveSurface({ ...target, content: `${target.content ?? ""}\n\n${send}` }); } select(sendTarget); setSend(null); setMessage("Inserted into typed notes."); };
-  const render = (tab: NoteSurface) => tab.id === "main" ? <div className="ink-main-typed">{children}</div> : tab.kind === "typed" ? <ExtraTyped key={tab.id} surface={tab} onChange={saveSurface} /> : <InkEditor syncStatusTarget={tab.id === activeTab.id ? syncStatusTarget : undefined} key={tab.id} userId={note.userId} noteId={note.id} surface={tab} preferences={preferences} onPreferences={changePreferences} courses={courses} defaultPaper={paper} onSend={value => { setSend(value); setSendTarget("main"); }} />;
+  const sendToText = () => { if (send === null) return; if (sendTarget === "main") { if (!hasMain) saveSurface({ ...MAIN }); onInsert(send); } else { const target = all.find(s => s.id === sendTarget); if (target) saveSurface({ ...target, content: `${target.content ?? ""}\n\n${send}` }); } select(sendTarget); setSend(null); setMessage("Inserted into typed notes."); };
+  const render = (tab: NoteSurface) => tab.id === "main" ? <div className="ink-main-typed">{children}</div> : tab.kind === "typed" ? <ExtraTyped key={tab.id} surface={tab} onChange={saveSurface} /> : <InkEditor syncStatusTarget={tab.id === activeTab?.id ? syncStatusTarget : undefined} key={tab.id} userId={note.userId} noteId={note.id} surface={tab} preferences={preferences} onPreferences={changePreferences} courses={courses} defaultPaper={paper} onSend={value => { setSend(value); setSendTarget("main"); }} />;
   const managed = all.find(s => s.id === manage);
   const surfaceToolbar = <>
-    <div className="ink-tabbar" role="tablist" aria-label="Note surfaces" onDragOver={e => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={e => { const file = Array.from(e.dataTransfer.files).find(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")); if (file) { e.preventDefault(); void importPdf(file); } }}>
+    <div ref={tabbarRef} className="ink-tabbar" role="tablist" aria-label="Note surfaces" onDragOver={e => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={e => { const file = Array.from(e.dataTransfer.files).find(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")); if (file) { e.preventDefault(); void importPdf(file); } }}>
       <button disabled={!historyCount} title="Previous surface" onClick={() => { const previous = history.current.pop(); if (previous) setActive(previous); setHistoryCount(history.current.length); }}>‹</button>
       {tabs.map(tab => <div className="ink-tab" key={tab.id} draggable onDragStart={() => { dragged.current = tab.id; }} onDragOver={e => e.preventDefault()} onDrop={() => { const order = [...tabs], index = order.findIndex(s => s.id === dragged.current); if (index < 0) return; const [moved] = order.splice(index, 1); order.splice(order.findIndex(s => s.id === tab.id), 0, moved); order.forEach((s, i) => saveSurface({ ...s, order: i * 1000 })); }}>
-        <button role="tab" aria-selected={activeTab.id === tab.id} onClick={() => select(tab.id)} onContextMenu={e => { e.preventDefault(); setManage(tab.id); setRename(tab.name); }}><span>{tab.kind === "typed" ? "T" : tab.kind === "ink" ? "✎" : "PDF"}</span>{tab.name}</button><button aria-label={`${tab.name} options`} onClick={() => { setManage(tab.id); setRename(tab.name); }}>⋯</button>
+        <button role="tab" aria-selected={activeTab?.id === tab.id} onClick={() => select(tab.id)} onContextMenu={e => { e.preventDefault(); setManage(tab.id); setRename(tab.name); }}><span>{tab.kind === "typed" ? "T" : tab.kind === "ink" ? "✎" : "PDF"}</span>{tab.name}</button><button aria-label={`${tab.name} options`} onClick={() => { setManage(tab.id); setRename(tab.name); }}>⋯</button>
       </div>)}
       <button onClick={() => setMenu(!menu)} disabled={busy} aria-label="Add a surface">+</button>
-      <button onClick={() => setSecond(second ? "" : tabs.find(t => t.id !== activeTab.id)?.id ?? "")} disabled={tabs.length < 2}>◫ {second ? "Close split" : "Split"}</button>
+      <button onClick={() => setSecond(second ? "" : tabs.find(t => t.id !== activeTab?.id)?.id ?? "")} disabled={tabs.length < 2}>◫ {second ? "Close split" : "Split"}</button>
       <button onClick={() => setSearchOpen(!searchOpen)}>⌕ Search</button>
       <div ref={setSyncStatusTarget} className="notes-header-sync" />
     </div>
@@ -113,11 +126,11 @@ export default function NoteWorkspace({ note, calendarId, children, onInsert, on
     {course && <div className="ink-course-label" style={{ color: course.color }}>{course.name}</div>}
     {menu && <div className="ink-add-menu"><button onClick={() => void add("typed").catch(fail)}>T Typed note</button><button onClick={() => void add("ink").catch(fail)}>✎ Handwritten pages</button><button onClick={() => { setReplaceTarget(null); fileRef.current?.click(); }}>▤ Import PDF</button>{all.filter(s => s.hidden || s.deleted).map(s => <button key={s.id} onClick={() => { saveSurface({ ...s, hidden: false, deleted: false }); select(s.id); setMenu(false); }}>Restore {s.name}</button>)}</div>}
     {searchOpen && <div className="ink-workspace-search"><form onSubmit={e => { e.preventDefault(); void search().catch(fail); }}><input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search this workspace…" aria-label="Search workspace" /><button>Search</button></form>{results.map((r, i) => <button key={i} onClick={() => { if (r.pageId) localStorage.setItem(`ink-page:${note.userId}:${note.id}:${r.surfaceId}`, r.pageId); if (r.surfaceId === active) { setActive("main"); setTimeout(() => setActive(r.surfaceId), 0); } else select(r.surfaceId); setSearchOpen(false); }}>{r.label}</button>)}</div>}
-    <div className="ink-workspace-panels"><div className="ink-workspace-panel" role="tabpanel">{render(activeTab)}</div>{second && second !== activeTab.id && tabs.find(t => t.id === second) && <div className="ink-workspace-panel"><select aria-label="Right split surface" value={second} onChange={e => setSecond(e.target.value)}>{tabs.filter(t => t.id !== activeTab.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>{render(tabs.find(t => t.id === second)!)}</div>}</div>
+    <div className="ink-workspace-panels"><div className="ink-workspace-panel" role="tabpanel">{activeTab ? render(activeTab) : !loaded || !preferencesLoaded || !coursesLoaded ? <div className="ink-empty">Opening {note.initialSurface === "pdf" ? "PDF" : "handwritten pages"}…</div> : note.initialSurface === "pdf" && !surfaces.some(s => s.kind === "pdf") ? <div className="ink-empty"><div><h2>Import a PDF</h2><p>Choose a document to read and annotate.</p><button className="ink-primary" disabled={busy} onClick={() => { setReplaceTarget(null); fileRef.current?.click(); }}>{busy ? "Importing PDF…" : "Choose PDF"}</button></div></div> : <div className="ink-empty">No pages open. Use + to add or restore a page.</div>}</div>{second && second !== activeTab?.id && tabs.find(t => t.id === second) && <div className="ink-workspace-panel"><select aria-label="Right split surface" value={second} onChange={e => setSecond(e.target.value)}>{tabs.filter(t => t.id !== activeTab?.id).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select>{render(tabs.find(t => t.id === second)!)}</div>}</div>
     <input type="file" accept="application/pdf,.pdf" ref={fileRef} hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void importPdf(file, replaceTarget); setReplaceTarget(null); }} />
     {message && <div className="ink-status" role="status">{message}<button aria-label="Dismiss" onClick={() => setMessage("")}>×</button></div>}
     {managed && <div className="ink-modal-scrim"><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Surface options"><h2>{managed.name}</h2><label>Tab name<input value={rename} onChange={e => setRename(e.target.value)} /></label><div className="ink-actions"><button className="ink-primary" onClick={() => { saveSurface({ ...managed, name: rename.trim() || managed.name }); setManage(null); }}>Rename</button><button onClick={() => { if (managed.id === "main") void duplicateSurface(note.id, { ...managed, content: note.content }).then(s => select(s.id)).catch(fail); else { setBusy(true); void duplicateSurface(note.id, managed).then(s => select(s.id)).catch(fail).finally(() => setBusy(false)); } setManage(null); }}>Duplicate</button>{managed.kind === "pdf" && <button disabled={busy} onClick={() => { setReplaceTarget(managed); setManage(null); fileRef.current?.click(); }}>Replace PDF</button>}{managed.id !== "main" && <><button onClick={() => { saveSurface({ ...managed, hidden: true }); setActive("main"); setSecond(""); setManage(null); }}>Close tab</button><button onClick={() => { saveSurface({ ...managed, deleted: true }); setActive("main"); setSecond(""); setManage(null); setMessage("Tab moved to Recently deleted. Restore it from +."); }}>Delete tab</button></>}<button onClick={() => setManage(null)}>Cancel</button></div><p>Closed and deleted surfaces can be restored from the + menu.</p></section></div>}
-    {send !== null && <div className="ink-modal-scrim"><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Insert into typed notes"><h2>Insert into typed notes</h2><select aria-label="Destination typed tab" value={sendTarget} onChange={e => setSendTarget(e.target.value)}>{all.filter(t => t.kind === "typed" && !t.deleted).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><p>The selection will be inserted at your last cursor position in Notes, or appended to another typed tab.</p><div className="ink-actions"><button className="ink-primary" onClick={sendToText}>Insert</button><button onClick={() => setSend(null)}>Cancel</button></div></section></div>}
+    {send !== null && <div className="ink-modal-scrim"><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Insert into typed notes"><h2>Insert into typed notes</h2><select aria-label="Destination typed tab" value={sendTarget} onChange={e => setSendTarget(e.target.value)}>{!hasMain && <option value="main">New typed notes</option>}{all.filter(t => t.kind === "typed" && !t.deleted).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select><p>The selection will be inserted at your last cursor position in Notes, or appended to another typed tab.</p><div className="ink-actions"><button className="ink-primary" onClick={sendToText}>Insert</button><button onClick={() => setSend(null)}>Cancel</button></div></section></div>}
   </section>;
 }
 

@@ -797,6 +797,7 @@ export default function NotesPage() {
     locallyDirtyNoteIdsRef.current.add(note.id);
     setNotes((current) => [...current, note]);
     setSelectedNoteId(note.id);
+    setTypedSurfaceActive(kind === "typed");
     setSelectedFolderId(destination.id);
     setExpandedIds((current) => new Set(current).add(destination.id));
     setEditorMode("write");
@@ -1321,7 +1322,7 @@ export default function NotesPage() {
             } as CSSProperties}
             title={note.title}
           >
-            {icon("description", 16, noteIsSelected ? calendarColor : undefined)}<span>{note.title || "Untitled note"}</span>
+            {icon(note.initialSurface === "ink" ? "draw" : note.initialSurface === "pdf" ? "picture_as_pdf" : "description", 16, noteIsSelected ? calendarColor : undefined)}<span>{note.title || "Untitled note"}</span>
           </button>;
         })}
         {!children.length && !folderNotes.length && <p className="notes-tree-empty" style={{ paddingLeft: 38 + depth * 14 }}>Empty folder</p>}
@@ -1440,9 +1441,9 @@ export default function NotesPage() {
           <button type="button" ref={collapseDocumentControlsRef} className="notes-document-controls-collapse" aria-label="Hide document title and toolbar" title="Hide document title and toolbar" aria-expanded={true} onClick={() => toggleDocumentControls(true)}>{icon("expand_less", 20)}</button>
           </div>
           <div className="notes-document-meta">
-            <span>{activeNote.content.trim() ? activeNote.content.trim().split(/\s+/).length : 0} words</span>
+            {typedSurfaceActive && <span>{activeNote.content.trim() ? activeNote.content.trim().split(/\s+/).length : 0} words</span>}
             <span>Edited {new Date(activeNote.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-            <span>Markdown</span>
+            <span>{typedSurfaceActive ? "Markdown" : activeNote.initialSurface === "pdf" ? "PDF" : activeNote.initialSurface === "ink" ? "Handwritten pages" : "Pages"}</span>
           </div>
           <NoteWorkspace onExportSurfaces={setExportSurfaces} headerTarget={workspaceHeaderTarget} key={`${activeNote.id}:${workspaceVersion}`} note={activeNote} calendarId={folderMap.get(activeNote.notebookId)?.calendarId} onSurfaceChange={setTypedSurfaceActive} onInsert={(markdown) => {
             const cursor = Math.min(lastTypedCursorRef.current, activeNote.content.length);
