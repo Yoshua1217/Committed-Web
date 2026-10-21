@@ -4,18 +4,21 @@ export type PaperKind = "blank" | "ruled" | "grid" | "dots" | "graph" | "cornell
 export type Paper = { kind: PaperKind; color: string; lineColor: string; spacing: number; width: number; height: number; margin: boolean };
 export type Pen = { id: string; name: string; color: string; width: number; minWidth?: number; maxWidth?: number; opacity: number; style: "pen" | "fountain" | "pencil" | "highlighter"; pressure: number; smoothing: number };
 export type InkObject = {
-  id: string; kind: "stroke" | "image" | "text" | "cover";
+  id: string; kind: "stroke" | "image" | "text" | "cover" | "shape" | "connector";
   points: Point[]; color: string; width: number; minWidth?: number; maxWidth?: number; opacity: number;
   style: Pen["style"]; pressure: number; order: number;
   x?: number; y?: number; w?: number; h?: number; rotation?: number;
   url?: string; text?: string; group?: string; audioTime?: number; audioRecordingId?: string;
+  board?: import("./canvas-model").CanvasStyle;
 };
-export type NoteSurface = { id: string; kind: "typed" | "ink" | "pdf"; name: string; order: number; hidden?: boolean; deleted?: boolean; content?: string; pdfPath?: string; pdfName?: string; pageCount?: number };
+export type NoteSurface = { id: string; kind: "typed" | "ink" | "whiteboard" | "canvas" | "pdf"; name: string; order: number; hidden?: boolean; deleted?: boolean; content?: string; pdfPath?: string; pdfName?: string; pageCount?: number };
 export type InkPage = { id: string; order: number; paper: Paper; label: string; bookmark: boolean; pdfPage?: number; deleted?: boolean; searchText?: string; pdfText?: string };
 export type Course = { id: string; name: string; color: string; notebookIds: string[]; calendarIds: string[]; paper: Paper };
 export type InkTemplate = { id: string; name: string; paper: Paper; createdAt: number };
 export type InkPreferences = { pens: Pen[]; defaultPen: string; paper: Paper; compact: boolean; enhancer: boolean; touch: "pan" | "ignore" | "draw"; leftHanded: boolean; highlightBelow: boolean; holdShapes: boolean };
 export const DEFAULT_PAPER: Paper = { kind: "ruled", color: "#fffdf7", lineColor: "#d8deea", spacing: 28, width: 816, height: 1056, margin: true };
+/** A roomy landscape canvas for visual thinking; deliberately larger than a note page. */
+export const WHITEBOARD_PAPER: Paper = { kind: "blank", color: "#ffffff", lineColor: "#ffffff", spacing: 28, width: 2600, height: 1600, margin: false };
 export const STARTER_PENS: Pen[] = [
   { id: "black", name: "Lecture black", color: "#20242c", width: 2, opacity: 1, style: "pen", pressure: .15, smoothing: .35 },
   { id: "blue", name: "Definition blue", color: "#2563eb", width: 2.7, opacity: 1, style: "pen", pressure: .15, smoothing: .35 },
@@ -103,6 +106,8 @@ export function transformObjects(objects: InkObject[], dx = 0, dy = 0, scale = 1
   const cx = b.x + b.w / 2, cy = b.y + b.h / 2, r = degrees * Math.PI / 180;
   const transform = (x: number, y: number) => ({ x: cx + ((x - cx) * Math.cos(r) - (y - cy) * Math.sin(r)) * scale + dx, y: cy + ((x - cx) * Math.sin(r) + (y - cy) * Math.cos(r)) * scale + dy });
   return objects.map(o => {
+    if (o.board?.locked) return o;
+    if (o.kind === "connector") { const board = { ...o.board }; if (!board.from && board.start) board.start = transform(board.start.x, board.start.y); if (!board.to && board.end) board.end = transform(board.end.x, board.end.y); return { ...o, board }; }
     if (o.kind === "stroke") return { ...o, width: o.width * scale, ...(o.minWidth !== undefined ? { minWidth: o.minWidth * scale } : {}), ...(o.maxWidth !== undefined ? { maxWidth: o.maxWidth * scale } : {}), points: o.points.map(p => ({ ...p, ...transform(p.x, p.y) })) };
     const center = transform((o.x ?? 0) + (o.w ?? 0) / 2, (o.y ?? 0) + (o.h ?? 0) / 2);
     return { ...o, x: center.x - (o.w ?? 0) * scale / 2, y: center.y - (o.h ?? 0) * scale / 2, w: (o.w ?? 0) * scale, h: (o.h ?? 0) * scale, width: o.width * scale, rotation: (o.rotation ?? 0) + degrees };

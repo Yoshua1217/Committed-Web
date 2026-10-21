@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { DrawingBlock } from "./drawing-block-context";
 import katex from "katex";
 import "katex/contrib/mhchem";
 import NotesTable from "./notes-table";
@@ -192,6 +193,8 @@ export default function NotesMarkdown({ content, headingIdPrefix, onContentChang
       codeLines.push(line);
       return;
     }
+    const drawing = line.trim().match(/^\[Drawing\]\(committed-drawing:([a-zA-Z0-9_-]+)\)$/);
+    if (drawing) { elements.push(<DrawingBlock key={`drawing-${drawing[1]}`} id={drawing[1]} />); return; }
     if (/^---+$/.test(line.trim())) {
       elements.push(<hr key={index} />);
       return;

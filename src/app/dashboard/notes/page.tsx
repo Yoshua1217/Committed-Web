@@ -34,6 +34,7 @@ import {
   subscribeToNoteFolders,
 } from "@/lib/notes-service";
 import { deleteNoteImages, uploadNoteImage } from "@/lib/note-image-service";
+import { DrawingInsertButton } from "@/components/drawing-block-context";
 import NotesMarkdown, { collectMarkdownHeadings } from "@/components/notes-markdown";
 import NotesFastScroll from "@/components/notes-fast-scroll";
 import NoteWorkspace from "@/components/note-workspace";
@@ -45,6 +46,7 @@ import { NotesHistory, listenForNoteHistory } from "@/lib/notes-history";
 
 import type { NoteSurface } from "@/lib/ink-model";
 import { markdownPages } from "@/lib/notes-markdown-export";
+import { loadNoteKinds, noteKind, noteKindIcon, type NoteKind } from "@/lib/note-kind";
 
 type EditorMode = "write" | "preview";
 type MenuAnchor = { left: number; top: number };
@@ -347,6 +349,30 @@ export default function NotesPage() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [newNoteMenu, setNewNoteMenu] = useState<{ folderId?: string | null } | null>(null);
   const [exportSurfaces, setExportSurfaces] = useState<{ noteId: string; surfaces: NoteSurface[] } | null>(null);
+  const [noteKinds, setNoteKinds] = useState<Record<string, NoteKind>>({});
+  const kindCache = useRef(new Map<string, NoteKind>());
+  const kindUserId = user?.uid;
+  const kindRequests = JSON.stringify(notes.filter(note => note.userId === kindUserId).map(note => ({ id: note.id, initialSurface: note.initialSurface })).sort((a, b) => a.id.localeCompare(b.id)));
+  useEffect(() => {
+    if (!kindUserId) return;
+    let stopped = false;
+    const prefix = `${kindUserId}:`;
+    const requests = (JSON.parse(kindRequests) as Pick<MarkdownNote, "id" | "initialSurface">[]).filter(note => !kindCache.current.has(prefix + note.id));
+    void loadNoteKinds(requests, () => stopped).then(kinds => {
+      for (const [id, kind] of Object.entries(kinds)) if (!kindCache.current.has(prefix + id)) kindCache.current.set(prefix + id, kind);
+      if (!stopped) setNoteKinds(Object.fromEntries(kindCache.current));
+    });
+    return () => { stopped = true; };
+  }, [kindRequests, kindUserId]);
+  const captureSurfaces = useCallback((value: { noteId: string; surfaces: NoteSurface[] }) => {
+    setExportSurfaces(value);
+    const note = notesRef.current.find(note => note.id === value.noteId);
+    if (!note) return;
+    const key = `${note.userId}:${note.id}`, kind = noteKind(note, value.surfaces);
+    kindCache.current.set(key, kind);
+    setNoteKinds(current => current[key] === kind ? current : { ...current, [key]: kind });
+  }, []);
+  const iconForNote = (note: MarkdownNote) => noteKindIcon(note.initialSurface === "pdf" ? "pdf" : noteKinds[`${note.userId}:${note.id}`] ?? noteKind(note));
   const [typedSurfaceActive, setTypedSurfaceActive] = useState(true);
   const [documentControlsCollapsed, setDocumentControlsCollapsed] = useState(false);
   const collapseDocumentControlsRef = useRef<HTMLButtonElement>(null);
@@ -769,7 +795,7 @@ export default function NotesPage() {
     setNewNoteMenu({ folderId });
   };
 
-  const createNoteOfType = (kind: "typed" | "ink" | "pdf") => {
+  const createNoteOfType = (kind: "typed" | "ink" | "whiteboard" | "canvas" | "pdf") => {
     const folderId = newNoteMenu?.folderId;
     setNewNoteMenu(null);
     if (!user) return;
@@ -1322,7 +1348,7 @@ export default function NotesPage() {
             } as CSSProperties}
             title={note.title}
           >
-            {icon(note.initialSurface === "ink" ? "draw" : note.initialSurface === "pdf" ? "picture_as_pdf" : "description", 16, noteIsSelected ? calendarColor : undefined)}<span>{note.title || "Untitled note"}</span>
+            {icon(iconForNote(note), 16, noteIsSelected ? calendarColor : undefined)}<span>{note.title || "Untitled note"}</span>
           </button>;
         })}
         {!children.length && !folderNotes.length && <p className="notes-tree-empty" style={{ paddingLeft: 38 + depth * 14 }}>Empty folder</p>}
@@ -1370,7 +1396,7 @@ export default function NotesPage() {
         {sidebarQuery ? <div className="notes-sidebar-results">
           <p className="notes-tree-label">SEARCH RESULTS</p>
           {sidebarResults.map((note) => <button type="button" key={note.id} onClick={() => selectNote(note)} className={`notes-search-result ${activeNote?.id === note.id ? "is-selected" : ""}`}>
-            {icon("description", 17)}<span><strong>{note.title}</strong><small>{contextSnippet(note.content, sidebarQuery)}</small></span>
+            {icon(iconForNote(note), 17)}<span><strong>{note.title}</strong><small>{contextSnippet(note.content, sidebarQuery)}</small></span>
           </button>)}
           {!sidebarResults.length && <div className="notes-no-results">No notes match “{sidebarQuery}”</div>}
         </div> : <>
@@ -1443,15 +1469,17 @@ export default function NotesPage() {
           <div className="notes-document-meta">
             {typedSurfaceActive && <span>{activeNote.content.trim() ? activeNote.content.trim().split(/\s+/).length : 0} words</span>}
             <span>Edited {new Date(activeNote.updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-            <span>{typedSurfaceActive ? "Markdown" : activeNote.initialSurface === "pdf" ? "PDF" : activeNote.initialSurface === "ink" ? "Handwritten pages" : "Pages"}</span>
+            <span>{typedSurfaceActive ? "Markdown" : activeNote.initialSurface === "pdf" ? "PDF" : activeNote.initialSurface === "whiteboard" ? "Whiteboard" : activeNote.initialSurface === "canvas" ? "Infinite canvas" : activeNote.initialSurface === "ink" ? "Handwritten pages" : "Pages"}</span>
           </div>
-          <NoteWorkspace onExportSurfaces={setExportSurfaces} headerTarget={workspaceHeaderTarget} key={`${activeNote.id}:${workspaceVersion}`} note={activeNote} calendarId={folderMap.get(activeNote.notebookId)?.calendarId} onSurfaceChange={setTypedSurfaceActive} onInsert={(markdown) => {
+          <NoteWorkspace onExportSurfaces={captureSurfaces} headerTarget={workspaceHeaderTarget} key={`${activeNote.id}:${workspaceVersion}`} note={activeNote} calendarId={folderMap.get(activeNote.notebookId)?.calendarId} onSurfaceChange={setTypedSurfaceActive} onInsert={(markdown) => {
+            if (markdown.includes("committed-drawing:")) setFormattedPreviewOpen(true);
             const cursor = Math.min(lastTypedCursorRef.current, activeNote.content.length);
             updateActiveNote({ content: `${activeNote.content.slice(0, cursor)}\n\n${markdown}\n\n${activeNote.content.slice(cursor)}` });
             setEditorMode("write");
           }}>
           {editorMode === "write" ? <div className="notes-editor-area">
             <div className="notes-format-strip" aria-label="Text formatting">
+              <DrawingInsertButton />
               <button type="button" onClick={() => wrapSelection("**", "**", "bold text")} title="Bold (Ctrl+B)">{icon("format_bold", 18)}</button>
               <button type="button" onClick={() => wrapSelection("*", "*", "italic text")} title="Italic (Ctrl+I)">{icon("format_italic", 18)}</button>
               <button type="button" onClick={() => wrapSelection("<u>", "</u>", "underlined text")} title="Underline (Ctrl+U)">{icon("format_underlined", 18)}</button>
@@ -1503,7 +1531,7 @@ export default function NotesPage() {
 
     {newNoteMenu && <div className="ink-modal-scrim ink-ui" onClick={() => setNewNoteMenu(null)}><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="New note type" onClick={event => event.stopPropagation()}>
       <div className="ink-dialog-title"><h2>What would you like to create?</h2><button aria-label="Close" onClick={() => setNewNoteMenu(null)}>×</button></div>
-      <div className="ink-new-note-options"><button autoFocus className="ink-primary" onClick={() => createNoteOfType("typed")}><strong>T · Typed note</strong><small>Default · Start typing, add handwriting or PDFs anytime.</small></button><button onClick={() => createNoteOfType("ink")}><strong>✎ · Handwritten pages</strong><small>Start with your course paper and favourite pen.</small></button><button onClick={() => createNoteOfType("pdf")}><strong>▤ · PDF note</strong><small>Import a document to annotate and sync across devices.</small></button></div>
+      <div className="ink-new-note-options"><button autoFocus className="ink-primary" onClick={() => createNoteOfType("typed")}><strong>T · Typed note</strong><small>Default · Start typing, add handwriting or PDFs anytime.</small></button><button onClick={() => createNoteOfType("ink")}><strong>✎ · Handwritten pages</strong><small>Start with your course paper and favourite pen.</small></button><button onClick={() => createNoteOfType("whiteboard")}><strong>▭ · Whiteboard</strong><small>A dedicated writing board with a minimap and quick erasing tools.</small></button><button onClick={() => createNoteOfType("canvas")}><strong>∞ · Infinite canvas</strong><small>An endless space for writing, shapes, and connected ideas.</small></button><button onClick={() => createNoteOfType("pdf")}><strong>▤ · PDF note</strong><small>Import a document to annotate and sync across devices.</small></button></div>
     </section></div>}
 
     {sidebarOpen && <button className="notes-sidebar-scrim" aria-label="Close notes navigation" onClick={() => setSidebarOpen(false)} />}
@@ -1543,7 +1571,7 @@ export default function NotesPage() {
           className={index === menuIndex ? "is-active" : ""}
           onPointerDown={(event) => { event.preventDefault(); selectInternalLink(note); }}
           onMouseEnter={() => setMenuIndex(index)}
-        ><span className="notes-command-icon">{icon("description", 19)}</span><span><strong>{note.title}</strong><small>{contextSnippet(note.content, linkRange.query)}</small></span></button>)}
+        ><span className="notes-command-icon">{icon(iconForNote(note), 19)}</span><span><strong>{note.title}</strong><small>{contextSnippet(note.content, linkRange.query)}</small></span></button>)}
         {!linkResults.length && <p className="notes-command-empty">No other notes found</p>}
       </div>
     </div>}
@@ -1555,11 +1583,11 @@ export default function NotesPage() {
           <button type="button" disabled={indexLoading} onClick={() => { setIndexLoading(true); setIndexedCount(0); void import("@/lib/note-workspace-search").then(({ loadWorkspaceSearch }) => loadWorkspaceSearch(notesRef.current, setIndexedCount)).then(setWorkspaceIndex).catch(e => showImageNotice(e.message, true)).finally(() => setIndexLoading(false)); }}><span><strong>{indexLoading ? `Reading page text · ${indexedCount}/${notes.length}` : workspaceIndex.length ? "Refresh handwriting & PDF search" : "Include handwriting & PDFs"}</strong><small>Search PDF text, labels, extra typed tabs, and reviewed handwriting across every notebook.</small></span></button>
           <p>{searchQuery ? `${globalResults.length} result${globalResults.length === 1 ? "" : "s"}` : "Recently edited"}</p>
           {globalResults.slice(0, 30).map((note) => <button type="button" key={note.id} onClick={() => selectNote(note)}>
-            <span className="notes-search-modal-icon">{icon("description", 20)}</span>
+            <span className="notes-search-modal-icon">{icon(iconForNote(note), 20)}</span>
             <span><strong>{note.title}</strong><small>{contextSnippet(note.content, searchQuery)}</small><em>{folderMap.get(note.notebookId)?.name ?? "Notes"} / {folderMap.get(note.folderId)?.name ?? "Unfiled"}</em></span>
             {icon("north_west", 17)}
           </button>)}
-          {pageResults.slice(0, 50).map(entry => <button type="button" key={`${entry.noteId}:${entry.surfaceId}:${entry.pageId ?? ""}`} onClick={() => { const note = notes.find(n => n.id === entry.noteId); if (!note) return; const query = new URLSearchParams({ note: note.id, surface: entry.surfaceId, ...(entry.pageId ? { page: entry.pageId } : {}) }); window.history.replaceState(null, "", `${location.pathname}?${query}`); void import("@/lib/ink-service").then(({ saveInk, surfacePath }) => saveInk(surfacePath(note.id), { id: entry.surfaceId, hidden: false })).catch(e => showImageNotice(e.message, true)); setWorkspaceVersion(v => v + 1); selectNote(note); }}><span className="notes-search-modal-icon">{icon("ink_pen", 20)}</span><span><strong>{entry.title}</strong><small>{contextSnippet(entry.text, searchQuery)}</small></span>{icon("north_west", 17)}</button>)}
+          {pageResults.slice(0, 50).map(entry => <button type="button" key={`${entry.noteId}:${entry.surfaceId}:${entry.pageId ?? ""}`} onClick={() => { const note = notes.find(n => n.id === entry.noteId); if (!note) return; const query = new URLSearchParams({ note: note.id, surface: entry.surfaceId, ...(entry.pageId ? { page: entry.pageId } : {}) }); window.history.replaceState(null, "", `${location.pathname}?${query}`); void import("@/lib/ink-service").then(({ saveInk, surfacePath }) => saveInk(surfacePath(note.id), { id: entry.surfaceId, hidden: false })).catch(e => showImageNotice(e.message, true)); setWorkspaceVersion(v => v + 1); selectNote(note); }}><span className="notes-search-modal-icon">{icon(noteKindIcon(entry.kind ?? "ink"), 20)}</span><span><strong>{entry.title}</strong><small>{contextSnippet(entry.text, searchQuery)}</small></span>{icon("north_west", 17)}</button>)}
           {!globalResults.length && !pageResults.length && <div className="notes-search-empty">{icon("search_off", 28)}<strong>No matching notes</strong><span>Try another title or phrase.</span></div>}
         </div>
       </div>

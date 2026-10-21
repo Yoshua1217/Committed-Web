@@ -8,10 +8,10 @@ const DocumentViewContext = createContext<DocumentView | null>(null);
 export const useDocumentView = () => useContext(DocumentViewContext);
 
 /** One scroll surface and scale for every page, including pages mounted lazily. */
-export default function InkDocumentViewport({ pages, reading, onScroll, children }: { pages: InkPage[]; reading: boolean; onScroll: (element: HTMLDivElement) => void; children: ReactNode }) {
+export default function InkDocumentViewport({ pages, reading, onScroll, children, initialScale }: { pages: InkPage[]; reading: boolean; onScroll: (element: HTMLDivElement) => void; children: ReactNode; initialScale?: number }) {
   const root = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
-  const currentScale = useRef(1);
+  const [scale, setScale] = useState(initialScale ?? 1);
+  const currentScale = useRef(initialScale ?? 1);
   const zoomFrame = useRef<number | null>(null);
   const pendingZoom = useRef<{ scale: number; x?: number; y?: number } | null>(null);
   const scrollFrame = useRef<number | null>(null);
@@ -21,10 +21,31 @@ export default function InkDocumentViewport({ pages, reading, onScroll, children
     if (scrollFrame.current !== null) return;
     scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = null; if (root.current) onScrollRef.current(root.current); });
   };
-  const mode = useRef<"width" | "page" | "manual">("width");
+  const mode = useRef<"width" | "page" | "manual">(initialScale === undefined ? "width" : "manual");
+  const initialCentered = useRef(false);
   const anchor = useRef<{ x: number; y: number; left: number; top: number; ratio: number; page?: HTMLElement; pageX?: number; pageY?: number } | null>(null);
   const width = Math.max(1, ...pages.map(page => page.paper.width));
   const height = Math.max(1, ...pages.map(page => page.paper.height));
+  useLayoutEffect(() => {
+    const element = root.current;
+    if (!element || initialScale === undefined || initialCentered.current) return;
+    // Ink mounts after its object subscription resolves. Center once the real
+    // transformed paper is available, then leave subsequent navigation alone.
+    const center = () => {
+      const page = element.querySelector<HTMLElement>(".ink-page");
+      if (!page || initialCentered.current) return;
+      const board = page.getBoundingClientRect(), viewport = element.getBoundingClientRect();
+      if (!board.width || !element.clientWidth || !element.clientHeight) return;
+      element.scrollLeft += board.left + board.width / 2 - viewport.left - element.clientLeft - element.clientWidth / 2;
+      element.scrollTop += board.top + board.height / 2 - viewport.top - element.clientTop - element.clientHeight / 2;
+      initialCentered.current = true;
+    };
+    const mutations = new MutationObserver(center), resize = new ResizeObserver(center);
+    mutations.observe(element, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+    resize.observe(element);
+    center();
+    return () => { mutations.disconnect(); resize.disconnect(); };
+  }, [initialScale]);
   const commitScale = (next: number, x?: number, y?: number) => {
     const element = root.current;
     if (!element) return;

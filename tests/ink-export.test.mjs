@@ -16,7 +16,7 @@ const browserDocument = { createElement(kind) {
 } };
 const fakeUrl = { createObjectURL(blob) { const id = String(urls.size); urls.set(id, blob); return id; }, revokeObjectURL() {} };
 function load(name, dependencies = {}) { const js = ts.transpileModule(fs.readFileSync(new URL(`../src/lib/${name}.ts`, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText; const mod = { exports: {} }; new Function("module", "exports", "require", "document", "URL", "setTimeout", js)(mod, mod.exports, id => dependencies[id] ?? nodeRequire(id), browserDocument, fakeUrl, () => 0); return mod.exports; }
-const model = load("ink-model"), renderer = load("ink-renderer", { "./ink-model": model });
+const model = load("ink-model"), renderer = load("ink-renderer", { "./ink-model": model, "./canvas-model": load("canvas-model") });
 async function render(bytes, number) { const pdf = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true }).promise; const page = await pdf.getPage(number); const viewport = page.getViewport({ scale: 1 }); const canvas = createCanvas(viewport.width, viewport.height); await page.render({ canvas, canvasContext: canvas.getContext("2d"), viewport }).promise; await pdf.loadingTask.destroy(); return canvas; }
 test("PDF export keeps page geometry and visible content at all four rotations", async () => {
   const source = await PDFDocument.create(), pages = [];

@@ -1,5 +1,9 @@
 "use client";
 
+import { CanvasShape, CanvasConnections } from "./canvas-objects";
+import { canvasPlainText, toggleCanvasCheck } from "@/lib/canvas-text";
+import { PageDiagramGesture } from "@/lib/page-diagram";
+import { DEFAULT_STYLE, connection, type CanvasStyle, type ShapeKind } from "@/lib/canvas-model";
 import { useDocumentView } from "./ink-document-viewport";
 import { useLayoutEffect, useEffect, useRef, useImperativeHandle, forwardRef, useState } from "react";
 import { TbZoomIn, TbZoomOut } from "react-icons/tb";
@@ -8,8 +12,9 @@ import { constrainInkView, fitInkView, inkRasterSize, inkRasterRegion, inkRegion
 import { InkObject, Paper, Pen, Point, penAtZoom, eraseObjects, enhancePoints, fountainPool, fountainWidths, smoothFountainWidth, spreadFountainPool, withinInkHold, lassoObjects, objectBounds, recognizeHeldShape, shapePoints, transformObjects, uid } from "@/lib/ink-model";
 import { drawObject, drawObjects, drawPaper, drawSegment, loadInkImage } from "@/lib/ink-renderer";
 import { snapPdfHighlight, type PdfTextLine } from "@/lib/pdf-highlight";
+import { nativePenButtonHeld, penEraserHeld, penInContact } from "@/lib/ink-pointer";
 
-export type InkTool = "pen" | "eraser" | "lasso" | "pan" | "shape" | "cover" | "text";
+export type InkTool = "select" | "connector" | "pen" | "eraser" | "whiteboard-eraser" | "lasso" | "pan" | "shape" | "cover" | "text";
 export type InkCanvasApi = { fit: () => void; fitWidth: () => void; zoom: (factor: number) => void };
 type Props = {
   objects: InkObject[]; paper: Paper; pen: Pen; tool: InkTool; shape: string;
@@ -17,10 +22,13 @@ type Props = {
   selected: string[]; onSelect: (ids: string[]) => void; onChange: (objects: InkObject[]) => void;
   highlightBelow: boolean; holdShapes: boolean; study: boolean; background?: string;
   onText: (x: number, y: number) => void;
+  onEditObject?: (id: string) => void; boardStyle?: CanvasStyle; onTool?: (tool: InkTool) => void;
   rectangularLasso?: boolean;
   focusMode?: boolean;
   continuous?: boolean;
+  initialScale?: number;
   pdfLines?: PdfTextLine[];
+  buttonEraser?: "eraser" | "whiteboard-eraser";
 };
 
 /** No React state, geometry scans, networking, or smoothing in the live ink path. */
@@ -29,6 +37,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
   const documentViewRef = useRef(documentView); documentViewRef.current = documentView;
   const viewportRef = useRef<HTMLDivElement>(null), pageRef = useRef<HTMLDivElement>(null);
   const paperRef = useRef<HTMLCanvasElement>(null), settledRef = useRef<HTMLCanvasElement>(null), liveRef = useRef<HTMLCanvasElement>(null);
+  const diagramLayer = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
   const latest = useRef(props); latest.current = props;
   const view = useRef({ x: 20, y: 20, scale: 1 });
@@ -38,6 +47,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
   const gestureActive = useRef(false);
   const refreshResolution = useRef<(immediate?: boolean) => void>(() => {});
   const fitMode = useRef<"auto" | "page" | "width" | "manual">("auto");
+  const appliedInitialScale = useRef(false);
   const applyView = () => {
     const viewport = viewportRef.current;
     if (viewport && latest.current.continuous) {
@@ -51,6 +61,15 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
   const refit = () => {
     const viewport = viewportRef.current; if (!viewport || !viewport.clientWidth || !viewport.clientHeight) return;
     if (documentViewRef.current) { view.current.scale = documentViewRef.current.scale; applyView(); setZoomLabel(Math.round(view.current.scale * 100)); return; }
+    if (!appliedInitialScale.current && latest.current.initialScale) {
+      appliedInitialScale.current = true;
+      // A caller can opt into an intentionally close initial view (such as a
+      // whiteboard). Keep it manual so subsequent layout measurements do not
+      // immediately fit the full canvas back into view.
+      fitMode.current = "manual";
+      view.current = { x: 28, y: 28, scale: latest.current.initialScale };
+      applyView(); setZoomLabel(Math.round(view.current.scale * 100)); return;
+    }
     if (latest.current.continuous && fitMode.current !== "manual") {
       view.current = { x: 20, y: 20, scale: Math.max(.1, (viewport.clientWidth - 40) / latest.current.paper.width) };
       applyView(); setZoomLabel(Math.round(view.current.scale * 100)); return;
@@ -159,10 +178,14 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     const viewport = viewportRef.current!, live = liveRef.current!, settled = settledRef.current!;
     // Context attributes are established once by the sizing effect above.
     const liveCtx = live.getContext("2d")!, ctx = settled.getContext("2d")!;
+    let diagram: PageDiagramGesture | null = null;
     let active: number | null = null, stroke: InkObject | null = null, polygon: Point[] = [], start: Point | null = null, previous: Point | null = null;
     let working = latest.current.objects, initial = working, moving = false, resizing = false, erasing = false, pointerIsPen = false, holdTimer: ReturnType<typeof setInterval> | undefined;
     let movingIds: string[] = [];
     let rotating = false;
+    let gestureTool: InkTool = latest.current.tool;
+    let lastPenEvent: PointerEvent | null = null;
+    const pointerTool = (e: PointerEvent): InkTool => penEraserHeld(e, e.pointerType === "pen" ? nativePenButtonHeld() : null) ? latest.current.buttonEraser ?? "eraser" : latest.current.tool;
     let rect = viewport.getBoundingClientRect(), lastPenTime = -Infinity, held = false, heldKind = "line";
     let holdAnchor: Point | null = null, holdSince = 0, holdAttempted = false;
     const touches = new Map<number, { x: number; y: number }>();
@@ -178,18 +201,28 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       const selectionKey = selection.join(",");
       const canAppend = paintedWidth === settled.width && !selectionKey && !paintedSelection && !latest.current.study && !paintedStudy && latest.current.highlightBelow === paintedBelow
         && objects.length >= painted.length && painted.every((o, i) => objects[i] === o)
-        && !painted.some(o => o.kind === "cover" || o.kind === "image")
-        && objects.slice(painted.length).every(o => o.kind !== "image" && !(latest.current.highlightBelow && o.style === "highlighter"));
+        && !painted.some(o => o.kind === "cover" || o.kind === "image" || o.kind === "connector")
+        && objects.slice(painted.length).every(o => o.kind !== "image" && o.kind !== "shape" && o.kind !== "connector" && !(latest.current.highlightBelow && o.style === "highlighter"));
+      if (diagramLayer.current) diagramLayer.current.style.visibility = diagram || moving ? "hidden" : "";
+      const visibleObjects = diagram || moving ? objects : objects.filter(o => o.kind !== "shape" && o.kind !== "connector");
       if (canAppend) drawObjects(ctx, objects.slice(painted.length), latest.current.highlightBelow);
-      else { ctx.clearRect(0, 0, latest.current.paper.width, latest.current.paper.height); drawObjects(ctx, objects, latest.current.highlightBelow, latest.current.study, revealed); }
+      else { ctx.clearRect(0, 0, latest.current.paper.width, latest.current.paper.height); drawObjects(ctx, visibleObjects, latest.current.highlightBelow, latest.current.study, revealed); }
       painted = [...objects]; paintedSelection = selectionKey; paintedBelow = latest.current.highlightBelow; paintedStudy = latest.current.study; paintedWidth = settled.width;
       if (!latest.current.study) {
-        const b = objectBounds(objects.filter(o => selection.includes(o.id)));
-        if (b) { ctx.save(); ctx.strokeStyle = "#6366f1"; ctx.lineWidth = 1.5 / view.current.scale; ctx.setLineDash([6 / view.current.scale, 4 / view.current.scale]); ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8); ctx.setLineDash([]); ctx.fillStyle = "#6366f1"; ctx.fillRect(b.x + b.w - 5, b.y + b.h - 5, 10, 10);
+        const selectedEdge = selection.length === 1 ? objects.find(o => o.id === selection[0] && o.kind === "connector") : undefined;
+        const edge = selectedEdge && connection(selectedEdge, objects);
+        const b = edge ? { x:Math.min(edge.start.x,edge.end.x),y:Math.min(edge.start.y,edge.end.y),w:Math.abs(edge.start.x-edge.end.x),h:Math.abs(edge.start.y-edge.end.y) } : objectBounds(objects.filter(o => selection.includes(o.id)));
+        if (b) { ctx.save(); ctx.strokeStyle = "#777"; ctx.lineWidth = 1.5 / view.current.scale; ctx.setLineDash([6 / view.current.scale, 4 / view.current.scale]); ctx.strokeRect(b.x - 4, b.y - 4, b.w + 8, b.h + 8); ctx.setLineDash([]); ctx.fillStyle = "#6366f1"; ctx.fillRect(b.x + b.w - 5, b.y + b.h - 5, 10, 10);
           if (latest.current.tool === "lasso" || (latest.current.tool === "pan" && objects.some(o => o.kind === "text" && selection.includes(o.id)))) {
             const radius = 8 / view.current.scale;
             ctx.beginPath(); ctx.arc(b.x + b.w, b.y, radius, 0, Math.PI * 2); ctx.fill();
             ctx.strokeStyle = "white"; ctx.beginPath(); ctx.arc(b.x + b.w, b.y, radius * .5, -.7, 3.8); ctx.stroke();
+          }
+          if (latest.current.tool === "select") {
+            ctx.setLineDash([]); ctx.fillStyle = "white"; ctx.strokeStyle = "#555";
+            const chosen = objects.find(o => selection.length === 1 && o.id === selection[0]);
+            const handles = chosen?.kind === "connector" ? [connection(chosen, objects).start, connection(chosen, objects).end] : [ [0,0],[.5,0],[1,0],[1,.5],[1,1],[.5,1],[0,1],[0,.5] ].map(([x,y])=>({x:b.x+b.w*x,y:b.y+b.h*y}));
+            if (chosen && !chosen.board?.locked) for (const p of handles) { const size=8/view.current.scale; ctx.fillRect(p.x-size/2,p.y-size/2,size,size); ctx.strokeRect(p.x-size/2,p.y-size/2,size,size); }
           }
           ctx.restore(); }
       }
@@ -197,15 +230,28 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     repaint.current = (force = false) => { if (force) paintedWidth = 0; if (!gestureActive.current) paint(); };
     const position = (e: PointerEvent): Point => ({ x: Math.max(0, Math.min(latest.current.paper.width, (e.clientX - rect.left - view.current.x) / view.current.scale)), y: Math.max(0, Math.min(latest.current.paper.height, (e.clientY - rect.top - view.current.y) / view.current.scale)), p: e.pointerType === "pen" ? e.pressure || .5 : .5, t: e.timeStamp });
     const navStart = () => { const [a, b] = [...touches.values()]; if (!a) { navigation = null; return; } navigation = { x: b ? (a.x + b.x) / 2 : a.x, y: b ? (a.y + b.y) / 2 : a.y, distance: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0, view: { ...view.current } }; };
-    const end = (e: PointerEvent) => {
+    const end = (e: PointerEvent, atPointer = true) => {
+      if (atPointer && e.pointerType === "pen") lastPenEvent = null;
       if (touches.delete(e.pointerId)) {
         if (e.pointerType === "pen") { lastPenTime = performance.now(); pointerIsPen = false; }
         navStart(); setZoomLabel(Math.round(view.current.scale * 100)); return;
       }
       if (active !== e.pointerId) return;
       clearInterval(holdTimer);
-      const p = position(e), canceled = e.type === "pointercancel" || e.type === "lostpointercapture";
-      const options = latest.current;
+      const p = atPointer ? position(e) : stroke?.points.at(-1) ?? previous ?? position(e), canceled = e.type === "pointercancel" || e.type === "lostpointercapture";
+      const options = { ...latest.current, tool: gestureTool };
+      if (diagram) {
+        if (diagramLayer.current) diagramLayer.current.style.visibility = "";
+        const next = canceled ? diagram.before : diagram.objects;
+        const selection = canceled ? [] : diagram.selected;
+        diagram = null; moving = false; active = null; gestureActive.current = false; start = null; paintedWidth = 0; clear();
+        options.onChange(next); options.onSelect(selection); paint(next, selection);
+        if (!canceled && (gestureTool === "shape" || gestureTool === "connector")) options.onTool?.("select");
+        if (!canceled && gestureTool === "shape" && ["text", "sticky", "note"].includes(options.shape) && selection[0]) options.onEditObject?.(selection[0]);
+        refreshResolution.current();
+        requestAnimationFrame(() => { if (viewportRef.current === viewport && viewport.isConnected) repaint.current(true); });
+        return;
+      }
       if (stroke) {
         if (!canceled && !held && options.tool !== "shape" && options.tool !== "cover") {
           const last = stroke.points.at(-1)!; if (Math.hypot(last.x - p.x, last.y - p.y) > .1) { if (stroke.style === "fountain") p.pool = smoothFountainWidth(stroke, last, p, options.enhancer ? options.pen.smoothing : 0) / stroke.width; stroke.points.push(p); }
@@ -251,11 +297,35 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         clear(); drawObject(liveCtx, { ...stroke, opacity: 1 });
       }
     };
-    const down = (e: PointerEvent) => {
+    const updateCursor = (e: PointerEvent) => {
+      const cursor = cursorRef.current;
+      if (!cursor || e.pointerType === "touch") return;
+      const options = latest.current;
+      const tool = pointerTool(e);
+      const eraser = tool === "whiteboard-eraser" || tool === "eraser";
+      if ((active !== null && !eraser) || (e.pointerType !== "pen" && !eraser)) { cursor.style.display = "none"; return; }
+      const size = tool === "whiteboard-eraser" ? 70 : Math.max(3, eraser ? options.eraserSize * view.current.scale : options.pen.width);
+      const bounds = viewport.getBoundingClientRect();
+      cursor.style.display = "block";
+      cursor.style.width = `${size}px`; cursor.style.height = `${size}px`;
+      cursor.style.transform = `translate(${e.clientX - bounds.left - size / 2}px, ${e.clientY - bounds.top - size / 2}px)`;
+    };
+    const down = (e: PointerEvent, objects = latest.current.objects) => {
       if ((e.target as HTMLElement).closest(".ink-zoom-controls")) return;
+      if (pointerTool(e) === "select") {
+        const target = e.target as HTMLElement, check = target.closest<HTMLElement>("[data-canvas-check]"), parent = check?.closest("[data-object-id]");
+        if (check && parent) {
+          const object=objects.find(o=>o.id===parent.getAttribute("data-object-id"));
+          if(object && !object.board?.locked) { const index=Array.from(parent.querySelectorAll("[data-canvas-check]")).indexOf(check), html=toggleCanvasCheck(object.board?.html ?? "",index); latest.current.onChange(objects.map(o=>o.id===object.id?{...o,text:canvasPlainText(html),board:{...o.board,html}}:o)); }
+          e.preventDefault(); return;
+        }
+        if (target.closest(".page-diagram-layer a")) return;
+      }
+      if (e.pointerType === "pen") lastPenEvent = e;
+      if (e.pointerType === "pen" && !penInContact(e)) { updateCursor(e); return; }
       setZoomOpen(false);
       if (e.button !== 0 && e.pointerType !== "pen") return;
-      const options = latest.current; rect = viewport.getBoundingClientRect();
+      const options = { ...latest.current, tool: pointerTool(e) }; rect = viewport.getBoundingClientRect();
       refreshResolution.current(true);
       viewport.closest<HTMLElement>(".ink-page-editor")?.focus({ preventScroll: true });
       if (e.pointerType === "touch" && (pointerIsPen || performance.now() - lastPenTime < 350 || e.width > 55 || e.height > 55)) return;
@@ -273,10 +343,17 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       const rawX = (e.clientX - rect.left - view.current.x) / view.current.scale, rawY = (e.clientY - rect.top - view.current.y) / view.current.scale;
       if (options.tool !== "pan" && (rawX < 0 || rawY < 0 || rawX > options.paper.width || rawY > options.paper.height)) return;
       e.preventDefault(); viewport.setPointerCapture(e.pointerId); active = e.pointerId; gestureActive.current = true; pointerIsPen = e.pointerType === "pen";
-      if (cursorRef.current) cursorRef.current.style.display = "none";
+      gestureTool = options.tool;
+      updateCursor(e);
       if (pointerIsPen) { touches.clear(); navigation = null; lastPenTime = performance.now(); }
-      holdAnchor = null; held = false; rotating = false; start = position(e); previous = start; working = latest.current.objects; initial = working;
+      holdAnchor = null; held = false; rotating = false; start = position(e); previous = start; working = objects; initial = working;
       if (options.study) { const cover = [...working].reverse().find(o => o.kind === "cover" && start!.x >= (o.x ?? 0) && start!.x <= (o.x ?? 0) + (o.w ?? 0) && start!.y >= (o.y ?? 0) && start!.y <= (o.y ?? 0) + (o.h ?? 0)); if (cover) { if (revealed.has(cover.id)) revealed.delete(cover.id); else revealed.add(cover.id); paint(); } return; }
+      if (["shape", "select", "connector"].includes(options.tool)) {
+        if (diagramLayer.current) diagramLayer.current.style.visibility = "hidden";
+        diagram = new PageDiagramGesture();
+        diagram.begin(options.tool, start, objects, options.selected, view.current.scale, (options.shape === "line" ? "rounded" : options.shape) as ShapeKind, options.boardStyle ?? DEFAULT_STYLE, ctx, e.shiftKey);
+        paint(diagram.objects, diagram.selected); options.onSelect(diagram.selected); return;
+      }
       if (options.tool === "pan") {
         const selectedText = working.filter(o => o.kind === "text" && options.selected.includes(o.id));
         const bounds = objectBounds(selectedText);
@@ -298,7 +375,14 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); active = null; gestureActive.current = false; navStart(); return;
       }
       if (options.tool === "text") { options.onText(start.x, start.y); return; }
-      if (options.tool === "eraser" || (e.pointerType === "pen" && (e.buttons & 32 || e.buttons & 2))) { erasing = true; working = eraseObjects(working, start, start, options.eraserSize / 2, options.partialEraser); paint(working); return; }
+      if (options.tool === "eraser" || options.tool === "whiteboard-eraser") {
+        erasing = true;
+        // The board eraser is a separate, fixed 70-screen-pixel partial tool.
+        // Zoom changes its document radius, never its apparent size or the saved regular eraser settings.
+        const boardEraser = options.tool === "whiteboard-eraser";
+        working = eraseObjects(working, start, start, boardEraser ? 35 / view.current.scale : options.eraserSize / 2, boardEraser || options.partialEraser);
+        paint(working); return;
+      }
       if (options.tool === "lasso") {
         movingIds = [...options.selected];
         const bounds = objectBounds(working.filter(o => options.selected.includes(o.id)));
@@ -315,10 +399,23 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       live.style.opacity = String(stroke.opacity); drawObject(liveCtx, { ...stroke, opacity: 1 });
     };
     const move = (e: PointerEvent) => {
-      if (e.pointerType === "pen" && active === null && cursorRef.current) {
-        const size = Math.max(3, (latest.current.tool === "eraser" || (e.buttons & 32 || e.buttons & 2) ? latest.current.eraserSize * view.current.scale : latest.current.pen.width));
-        const bounds = viewport.getBoundingClientRect(), cursor = cursorRef.current;
-        cursor.style.display = "block"; cursor.style.width = `${size}px`; cursor.style.height = `${size}px`; cursor.style.transform = `translate(${e.clientX - bounds.left - size / 2}px, ${e.clientY - bounds.top - size / 2}px)`;
+      if (e.pointerType === "pen") lastPenEvent = e;
+      // Keep the eraser footprint visible through contact, including native raw
+      // pen updates; regular pen cursors still disappear while writing.
+      updateCursor(e);
+      // Chorded pen buttons change on move/rawupdate, including tip lift while
+      // the barrel button remains held. Split gestures at the last sampled
+      // point so changing tools never draws or erases a connecting segment.
+      if (e.pointerType === "pen") {
+        const interacting = active === e.pointerId || touches.has(e.pointerId);
+        if (interacting && (!penInContact(e) || pointerTool(e) !== gestureTool)) {
+          end(e, false);
+          if (penInContact(e)) down(e, working);
+          return;
+        }
+        // Contact after a hovering button press can arrive as a move with no
+        // changed-button flag. The contact bit, not `button`, starts the stroke.
+        if (!interacting && active === null && penInContact(e)) { down(e); return; }
       }
       if (touches.has(e.pointerId)) {
         const previousTouch = touches.get(e.pointerId)!;
@@ -348,10 +445,15 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       }
       if (active !== e.pointerId || !start) return;
       if (rawInput && pointerIsPen && e.type === "pointermove") { e.preventDefault(); return; }
-      e.preventDefault(); const options = latest.current, p = position(e);
-      if (erasing) { working = eraseObjects(working, previous!, p, options.eraserSize / 2, options.partialEraser); previous = p; paint(working); return; }
+      e.preventDefault(); const options = { ...latest.current, tool: gestureTool }, p = position(e);
+      if (diagram) { working = diagram.move(p, view.current.scale, e.shiftKey, e.altKey); paint(working, diagram.selected); return; }
+      if (erasing) {
+        const boardEraser = options.tool === "whiteboard-eraser";
+        working = eraseObjects(working, previous!, p, boardEraser ? 35 / view.current.scale : options.eraserSize / 2, boardEraser || options.partialEraser);
+        previous = p; paint(working); return;
+      }
       if (moving) {
-        const picked = initial.filter(o => movingIds.includes(o.id)), bounds = objectBounds(picked)!;
+        const picked = initial.filter(o => movingIds.includes(o.id) && !o.board?.locked), bounds = objectBounds(picked); if (!bounds) return;
         const cx = bounds.x + bounds.w / 2, cy = bounds.y + bounds.h / 2;
         const degrees = rotating ? (Math.atan2(p.y - cy, p.x - cx) - Math.atan2(start.y - cy, start.x - cx)) * 180 / Math.PI : 0;
         const transformed = transformObjects(picked, resizing || rotating ? 0 : p.x - start.x, resizing || rotating ? 0 : p.y - start.y, resizing ? Math.max(.1, Math.min(8, 1 + (p.x - start.x) / bounds.w)) : 1, degrees);
@@ -375,12 +477,18 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     };
     const wheel = (e: WheelEvent) => { if (documentViewRef.current) return; if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoom(Math.exp(-e.deltaY * .005)); } else if (!latest.current.continuous) { e.preventDefault(); view.current.x -= e.deltaX; view.current.y -= e.deltaY; applyView(); } };
     const rawMove = (event: Event) => { const pointer = event as PointerEvent; if (pointer.pointerType === "pen") move(pointer); };
-    const leave = () => { if (cursorRef.current) cursorRef.current.style.display = "none"; };
+    const nativeButtonChange = () => {
+      if (!lastPenEvent) return;
+      if (active === lastPenEvent.pointerId || touches.has(lastPenEvent.pointerId)) move(lastPenEvent);
+      else updateCursor(lastPenEvent);
+    };
+    const leave = () => { if (active === null) lastPenEvent = null; if (cursorRef.current) cursorRef.current.style.display = "none"; };
+    window.addEventListener("committed-pen-button", nativeButtonChange);
     viewport.addEventListener("pointerleave", leave);
     if (rawInput) viewport.addEventListener("pointerrawupdate", rawMove);
     viewport.addEventListener("pointerdown", down); viewport.addEventListener("pointermove", move); viewport.addEventListener("pointerup", end); viewport.addEventListener("pointercancel", end); viewport.addEventListener("lostpointercapture", end); viewport.addEventListener("wheel", wheel, { passive: false });
     paint();
-    return () => { clearInterval(holdTimer); viewport.removeEventListener("pointerleave", leave); viewport.removeEventListener("pointerrawupdate", rawMove); viewport.removeEventListener("pointerdown", down); viewport.removeEventListener("pointermove", move); viewport.removeEventListener("pointerup", end); viewport.removeEventListener("pointercancel", end); viewport.removeEventListener("lostpointercapture", end); viewport.removeEventListener("wheel", wheel); };
+    return () => { clearInterval(holdTimer); window.removeEventListener("committed-pen-button", nativeButtonChange); viewport.removeEventListener("pointerleave", leave); viewport.removeEventListener("pointerrawupdate", rawMove); viewport.removeEventListener("pointerdown", down); viewport.removeEventListener("pointermove", move); viewport.removeEventListener("pointerup", end); viewport.removeEventListener("pointercancel", end); viewport.removeEventListener("lostpointercapture", end); viewport.removeEventListener("wheel", wheel); };
     // Native handlers read current values through latest; never rebind mid-stroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -388,11 +496,17 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
 
   // Browser panning applies to pens too; keep it disabled before contact and
   // route finger navigation through pointer handlers so palms cannot scroll ink.
-  return <div className="ink-viewport" ref={viewportRef} style={{ touchAction: "none" }} aria-label={props.continuous ? "Writing page. Use a stylus to write and scroll to other pages." : "Writing page. Use a stylus to write and two fingers to pan and zoom."} onContextMenu={e => e.preventDefault()}>
+  return <div className="ink-viewport" ref={viewportRef} style={{ touchAction: "none" }} aria-label={props.continuous ? "Writing page. Use a stylus to write and scroll to other pages." : "Writing page. Use a stylus to write and two fingers to pan and zoom."} onContextMenu={e => e.preventDefault()} onDoubleClick={e => {
+      if(props.tool !== "select") return; const rect=pageRef.current?.getBoundingClientRect(); if(!rect) return;
+      const x=(e.clientX-rect.left)/view.current.scale,y=(e.clientY-rect.top)/view.current.scale;
+      const object=[...props.objects].reverse().find(o=>o.kind==="shape"&&!o.board?.locked&&x>=(o.x??0)&&y>=(o.y??0)&&x<=(o.x??0)+(o.w??0)&&y<=(o.y??0)+(o.h??0));
+      if(object) props.onEditObject?.(object.id);
+    }}>
     <div className="ink-page" ref={pageRef} style={{ width: props.paper.width, height: props.paper.height, backgroundColor: props.paper.color, colorScheme: "only light" }}>
       <canvas ref={paperRef} />
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {props.background && <img className="ink-pdf-background" src={props.background} alt="PDF page" draggable={false} />}
+      <div ref={diagramLayer} className={`page-diagram-layer tool-${props.tool}`}>{props.objects.filter(o => o.kind === "shape").sort((a,b)=>a.order-b.order).map(o => <CanvasShape key={o.id} object={o} editing={false} />)}<CanvasConnections objects={props.objects} selected={[]} /></div>
       <canvas ref={settledRef} /><canvas ref={liveRef} className="ink-live" />
     </div>
     <div className="ink-hover-cursor" ref={cursorRef} />

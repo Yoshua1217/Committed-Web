@@ -1,26 +1,117 @@
 "use client";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { inkPageAtViewport, preserveInkReadingPosition, preserveInkScroll } from "@/lib/ink-scroll";
-import { TbArrowLeft, TbArrowRight, TbEraser, TbGeometry, TbHandMove, TbLasso, TbPhoto, TbEyeOff, TbSettings, TbLayoutSidebarLeftExpand, TbBookmark, TbBookmarkFilled, TbTemplate, TbFileExport, TbMaximize, TbMinimize, TbZoomIn, TbZoomOut, TbSearch, TbBriefcase2 } from "react-icons/tb";
+import { TbEraser, TbSettings, TbLayoutSidebarLeftExpand, TbBookmark, TbBookmarkFilled, TbTemplate, TbFileExport, TbMaximize, TbMinimize, TbZoomIn, TbZoomOut, TbSearch, TbBriefcase2 } from "react-icons/tb";
 import { createPortal } from "react-dom";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import InkDocumentViewport, { useDocumentView } from "./ink-document-viewport";
 import InkCanvas, { InkCanvasApi, InkTool } from "./ink-canvas";
 import { Course, InkObject, InkPage, InkPreferences, InkTemplate, NoteSurface, Paper, Pen, newPage, objectBounds, transformObjects, uid } from "@/lib/ink-model";
 import { deleteInkTemplate, listenInk, objectPath, pagePath, readInk, readNoteFile, saveInk, saveInkChanges, templatesPath } from "@/lib/ink-service";
-import { objectsPng } from "@/lib/ink-renderer";
+import { drawObjects, drawPaper, loadInkImage, objectsPng } from "@/lib/ink-renderer";
 import { downloadBlob, exportSurfacePdf, openPdf, PdfTextLine, renderPdfPage } from "@/lib/note-pdf";
 import { uploadNoteImage } from "@/lib/note-image-service";
 import { InkHistory } from "@/lib/ink-history";
 import { canRecognizeHandwriting, recognizeHandwriting } from "@/lib/handwriting-recognition";
 import { saveTask } from "@/lib/tasks-service";
 import { clearInkDraft, InkDraft, makeInkDraft, mergeInkDraft, readInkDraft, storeInkDraft } from "@/lib/notes-local-drafts";
-import PenPreview from "./pen-preview";
+import InkEraserOptions from "./ink-eraser-options";
+import InkToolbar from "./ink-toolbar";
+import { arrangeCanvas } from "@/lib/canvas-actions";
+import CanvasTextEditor from "./canvas-text-editor";
+import { canvasTextHeight } from "@/lib/canvas-text";
+import CanvasSidebar from "./canvas-sidebar";
+import { DEFAULT_STYLE, type CanvasStyle, cloneObjects, removeObjects } from "@/lib/canvas-model";
+import "./infinite-canvas.css";
 import PenToolbox from "./pen-toolbox";
 import { PaperSettings, PenSettings } from "./ink-settings";
 
 let inkClipboard: InkObject[] = [];
+
+function WhiteboardMinimap({ sourceRef, paper, objects, highlightBelow }: { sourceRef: RefObject<HTMLDivElement | null>; paper: Paper; objects: InkObject[]; highlightBelow: boolean }) {
+  const preview = useRef<HTMLCanvasElement>(null), indicator = useRef<HTMLDivElement>(null);
+  const map = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const navigate = (clientX: number, clientY: number) => {
+    const page = sourceRef.current?.querySelector<HTMLElement>(".ink-page"), scroll = sourceRef.current?.closest<HTMLElement>(".ink-pdf-scroll"), mini = map.current;
+    if (!page || !scroll || !mini) return;
+    const bounds = mini.getBoundingClientRect(), board = page.getBoundingClientRect(), viewport = scroll.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width - (drag.current?.x ?? 0)));
+    const y = Math.max(0, Math.min(1, (clientY - bounds.top) / bounds.height - (drag.current?.y ?? 0)));
+    scroll.scrollLeft += board.left + board.width * x - viewport.left - scroll.clientLeft - scroll.clientWidth / 2;
+    scroll.scrollTop += board.top + board.height * y - viewport.top - scroll.clientTop - scroll.clientHeight / 2;
+  };
+  const documentView = useDocumentView();
+  useEffect(() => {
+    const canvas = preview.current, context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    let disposed = false;
+    const render = () => {
+      if (disposed) return;
+      context.setTransform(canvas.width / paper.width, 0, 0, canvas.height / paper.height, 0, 0);
+      drawPaper(context, paper);
+      drawObjects(context, objects, highlightBelow);
+    };
+    render();
+    const urls = [...new Set(objects.flatMap(object => object.kind === "image" && object.url ? [object.url] : []))];
+    if (urls.length) void Promise.allSettled(urls.map(loadInkImage)).then(render);
+    return () => { disposed = true; };
+  }, [paper, objects, highlightBelow]);
+  useLayoutEffect(() => {
+    const source = sourceRef.current, page = source?.querySelector<HTMLElement>(".ink-page"), scroll = source?.closest<HTMLElement>(".ink-pdf-scroll");
+    if (!page || !scroll) return;
+    let frame: number | null = null;
+    const update = () => {
+      frame = null;
+      const marker = indicator.current;
+      if (!marker) return;
+      const board = page.getBoundingClientRect(), viewport = scroll.getBoundingClientRect();
+      if (!board.width || !board.height) return;
+      const left = Math.max(0, Math.min(1, (viewport.left + scroll.clientLeft - board.left) / board.width));
+      const top = Math.max(0, Math.min(1, (viewport.top + scroll.clientTop - board.top) / board.height));
+      const right = Math.max(left, Math.min(1, (viewport.left + scroll.clientLeft + scroll.clientWidth - board.left) / board.width));
+      const bottom = Math.max(top, Math.min(1, (viewport.top + scroll.clientTop + scroll.clientHeight - board.top) / board.height));
+      Object.assign(marker.style, { left: `${left * 100}%`, top: `${top * 100}%`, width: `${(right - left) * 100}%`, height: `${(bottom - top) * 100}%` });
+    };
+    const schedule = () => { if (frame === null) frame = requestAnimationFrame(update); };
+    const resize = new ResizeObserver(schedule);
+    resize.observe(scroll); resize.observe(page);
+    const transforms = new MutationObserver(schedule);
+    transforms.observe(page, { attributes: true, attributeFilter: ["style"] });
+    scroll.addEventListener("scroll", schedule, { passive: true });
+    update();
+    return () => { resize.disconnect(); transforms.disconnect(); scroll.removeEventListener("scroll", schedule); if (frame !== null) cancelAnimationFrame(frame); };
+  }, [sourceRef, documentView?.scale]);
+  return <aside className="whiteboard-minimap" aria-label="Whiteboard minimap">
+    <div className="whiteboard-minimap-heading"><span>OVERVIEW</span><span className="whiteboard-minimap-key"><i />Your view</span></div>
+    <div ref={map} className="whiteboard-minimap-board" style={{ aspectRatio: `${paper.width} / ${paper.height}` }} role="group" tabIndex={0} aria-label="Navigate whiteboard. Click to move, drag the viewport rectangle, or use arrow keys."
+      onPointerDown={event => {
+        if (!event.isPrimary || event.button !== 0) return;
+        event.preventDefault(); event.stopPropagation();
+        event.currentTarget.focus({ preventScroll: true });
+        const bounds = event.currentTarget.getBoundingClientRect(), marker = indicator.current;
+        const hit = marker && marker.contains(event.target as Node), rectangle = marker?.getBoundingClientRect();
+        drag.current = { pointerId: event.pointerId, x: hit && rectangle ? (event.clientX - rectangle.left - rectangle.width / 2) / bounds.width : 0, y: hit && rectangle ? (event.clientY - rectangle.top - rectangle.height / 2) / bounds.height : 0 };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        navigate(event.clientX, event.clientY);
+      }}
+      onPointerMove={event => { if (drag.current?.pointerId === event.pointerId) { event.preventDefault(); event.stopPropagation(); navigate(event.clientX, event.clientY); } }}
+      onPointerUp={event => { if (drag.current?.pointerId === event.pointerId) { drag.current = null; event.currentTarget.releasePointerCapture(event.pointerId); } }}
+      onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }}
+      onKeyDown={event => {
+        const scroll = sourceRef.current?.closest<HTMLElement>(".ink-pdf-scroll");
+        if (!scroll || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        if (event.key === "ArrowLeft") scroll.scrollLeft -= scroll.clientWidth / 4;
+        if (event.key === "ArrowRight") scroll.scrollLeft += scroll.clientWidth / 4;
+        if (event.key === "ArrowUp") scroll.scrollTop -= scroll.clientHeight / 4;
+        if (event.key === "ArrowDown") scroll.scrollTop += scroll.clientHeight / 4;
+      }}>
+      <canvas ref={preview} width={360} height={Math.round(360 * paper.height / paper.width)} aria-label="Entire whiteboard preview" /><div ref={indicator} className="whiteboard-minimap-viewport" />
+    </div>
+  </aside>;
+}
 function lastTool(key: string): { penId?: string; tool?: InkTool; partial?: boolean; eraserSize?: number; shape?: string } { try { return JSON.parse(localStorage.getItem(key) ?? "{}"); } catch { return {}; } }
 type Props = { syncStatusTarget?: HTMLDivElement | null; userId: string; noteId: string; surface: NoteSurface; preferences: InkPreferences; onPreferences: (p: InkPreferences) => void; courses: Course[]; defaultPaper: Paper; onSend: (markdown: string) => void };
 
@@ -92,7 +183,7 @@ function useWritingTools(userId: string, noteId: string, surfaceId: string, defa
   const [remembered] = useState(() => lastTool(toolKey));
   const [penId, setPenId] = useState(remembered.penId ?? defaultPen);
   const [tool, setTool] = useState<InkTool>(remembered.tool ?? "pen");
-  const [shape, setShape] = useState(remembered.shape ?? "line");
+  const [shape, setShape] = useState(remembered.shape ?? "rounded");
   const [partial, setPartial] = useState(remembered.partial ?? false);
   const [eraserSize, setEraserSize] = useState(remembered.eraserSize ?? 20);
   const [pensCollapsed, setPensCollapsed] = useState(false);
@@ -236,7 +327,7 @@ export default function InkEditor(props: Props) {
         {visible.filter(p => (!bookmarksOnly || p.bookmark) && `${p.label} ${p.searchText ?? ""}`.toLowerCase().includes(filter.toLowerCase())).map(p => <div className={`ink-page-card ${p.id === page?.id ? "is-active" : ""}`} draggable onDragStart={() => setDragged(p.id)} onDragOver={e => e.preventDefault()} onDrop={() => reorder(p)} key={p.id}><button className="ink-page-thumbnail" aria-label={`Open page ${visible.indexOf(p) + 1}: ${p.label || "Untitled"}`} onClick={() => select(p.id)}><PageThumbnail noteId={noteId} surfaceId={surface.id} page={p} pdf={pdf} /></button><div className="ink-page-card-caption"><button className="ink-page-name" onClick={() => select(p.id)}>{p.bookmark ? "★ " : ""}{visible.indexOf(p) + 1} {p.label}</button><button className="ink-page-more" aria-label={`Options for page ${visible.indexOf(p) + 1}: ${p.label || "Untitled"}`} title="Page options" onClick={() => { setPageMenuId(p.id); setPageName(p.label); }}>⋯</button></div></div>)}
         <button onClick={() => setTrash(!trash)}>Recently deleted ({pages.filter(p => p.deleted).length})</button>{trash && pages.filter(p => p.deleted).map(p => <button key={p.id} onClick={() => savePage({ ...p, deleted: false })}>Restore {p.label || "page"}</button>)}
       </aside>}
-      {page && continuousPdf ? <InkDocumentViewport pages={visible} reading onScroll={trackScrollPage}>{visible.map((item, index) => <ScrollingPdfPage key={item.id} noteId={noteId} surfaceId={surface.id} page={item} pdf={pdf} number={index + 1} preload={index === visible.indexOf(page) || index === visible.indexOf(page) + 1} onAnnotate={() => { setPageId(item.id); changeAnnotationMode(true); }} />)}</InkDocumentViewport> : page ? <InkDocumentViewport pages={visible} reading={false} onScroll={trackScrollPage}>{visible.map((item, index) => <StackedPage key={item.id} page={item} number={index + 1} active={page.id === item.id} preload={index === visible.indexOf(page) + 1} onActivate={() => setPageId(item.id)}><InkPageEditor {...props} writingTools={writingTools} active={page.id === item.id} toolbarTarget={toolbarTarget} historyTarget={page.id === item.id ? historyTarget : null} viewControlsTarget={page.id === item.id ? viewControlsTarget : null} syncStatusTarget={page.id === item.id ? props.syncStatusTarget : null} onExport={() => { setSettingsOpen(false); setExportOpen(true); }} options={page.id === item.id && settingsOpen} setOptions={setSettingsOpen} fullscreen={fullscreen} toggleFull={toggleFull} pagesOpen={navigator} onTogglePages={() => setNavigator(value => !value)} page={item} pageNumber={index + 1} pdf={pdf} onPage={savePage} onMessage={setMessage} /></StackedPage>)}</InkDocumentViewport> : <div className="ink-empty"><h3>{loaded ? "A fresh page for your thoughts" : "Opening pages…"}</h3><button onClick={() => void addPage()}>Add handwritten page</button></div>}
+      {page && continuousPdf ? <InkDocumentViewport pages={visible} reading onScroll={trackScrollPage}>{visible.map((item, index) => <ScrollingPdfPage key={item.id} noteId={noteId} surfaceId={surface.id} page={item} pdf={pdf} number={index + 1} preload={index === visible.indexOf(page) || index === visible.indexOf(page) + 1} onAnnotate={() => { setPageId(item.id); changeAnnotationMode(true); }} />)}</InkDocumentViewport> : page ? <InkDocumentViewport pages={visible} initialScale={surface.kind === "whiteboard" ? 1 : undefined} reading={false} onScroll={trackScrollPage}>{visible.map((item, index) => <StackedPage key={item.id} page={item} number={index + 1} active={page.id === item.id} preload={index === visible.indexOf(page) + 1} onActivate={() => setPageId(item.id)}><InkPageEditor {...props} writingTools={writingTools} active={page.id === item.id} toolbarTarget={toolbarTarget} historyTarget={page.id === item.id ? historyTarget : null} viewControlsTarget={page.id === item.id ? viewControlsTarget : null} syncStatusTarget={page.id === item.id ? props.syncStatusTarget : null} onExport={() => { setSettingsOpen(false); setExportOpen(true); }} options={page.id === item.id && settingsOpen} setOptions={setSettingsOpen} fullscreen={fullscreen} toggleFull={toggleFull} pagesOpen={navigator} onTogglePages={() => setNavigator(value => !value)} page={item} pageNumber={index + 1} pdf={pdf} onPage={savePage} onMessage={setMessage} /></StackedPage>)}</InkDocumentViewport> : <div className="ink-empty"><h3>{loaded ? "A fresh page for your thoughts" : "Opening pages…"}</h3><button onClick={() => void addPage()}>Add handwritten page</button></div>}
     </div>
     {message && <div className="ink-status" role="status">{message}<button onClick={() => setMessage("")} aria-label="Dismiss">×</button></div>}
     {menuPage && !pageConfirmation && <div className="ink-modal-scrim" onClick={() => setPageMenuId(null)} onKeyDown={e => { if (e.key === "Escape") { e.stopPropagation(); setPageMenuId(null); } }}><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Page options" onClick={e => e.stopPropagation()}><div className="ink-dialog-title"><h2>Page options</h2><button aria-label="Close page options" onClick={() => setPageMenuId(null)}>×</button></div><form onSubmit={e => { e.preventDefault(); savePage({ ...menuPage, label: pageName.trim() }); setPageMenuId(null); }}><label>Page name<input autoFocus value={pageName} onChange={e => setPageName(e.target.value)} placeholder="Untitled page" /></label><div className="ink-actions"><button type="submit">Save name</button><button type="button" onClick={() => setPageConfirmation({ id: menuPage.id, action: "duplicate" })}>Duplicate</button><button type="button" onClick={() => setPageConfirmation({ id: menuPage.id, action: "delete" })}>Delete page</button></div></form></section></div>}
@@ -251,10 +342,11 @@ function InkPageEditor(props: Props & { active: boolean; toolbarTarget: HTMLDivE
   const { noteId, userId, surface, page, preferences: prefs, onPreferences, onMessage } = props;
   const { penId, setPenId, tool, setTool, shape, setShape, partial, setPartial, eraserSize, setEraserSize, pensCollapsed, setPensCollapsed, rectangularLasso, setRectangularLasso, study, setStudy } = props.writingTools;
   const [objects, setObjects] = useState<InkObject[]>([]), [selected, setSelected] = useState<string[]>([]), [loaded, setLoaded] = useState(false);
-  const penToolbarRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (pensCollapsed && penToolbarRef.current) penToolbarRef.current.scrollLeft = 0; }, [pensCollapsed]);
+  const [toolkitTop, setToolkitTop] = useState(220);
+  const [editingObject, setEditingObject] = useState<string | null>(null);
+  const [catalogue, setCatalogue] = useState(false), [boardStyle, setBoardStyle] = useState<CanvasStyle>(DEFAULT_STYLE);
   const previousTool = useRef(tool);
-  useEffect(() => { if (previousTool.current === "lasso" && tool !== "lasso") setSelected([]); previousTool.current = tool; }, [tool]);
+  useEffect(() => { if ((previousTool.current === "lasso" || previousTool.current === "select") && tool !== "lasso" && tool !== "select") setSelected([]); previousTool.current = tool; }, [tool]);
   const [editingPen, setEditingPen] = useState<Pen | null>(null);
   const { options, setOptions } = props;
   const [settingsTab, setSettingsTab] = useState<"writing" | "paper" | "view">("writing");
@@ -262,17 +354,26 @@ function InkPageEditor(props: Props & { active: boolean; toolbarTarget: HTMLDivE
   const [pdfLines, setPdfLines] = useState<PdfTextLine[]>([]), [textMode, setTextMode] = useState(false), [pdfSelection, setPdfSelection] = useState<number[]>([]);
   const [status, setStatus] = useState("Opening ink…"), [historyVersion, setHistoryVersion] = useState(0), [textDialog, setTextDialog] = useState<{ id?: string; x: number; y: number; text: string } | null>(null);
   const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [whiteboardDockOpen, setWhiteboardDockOpen] = useState(false), [confirmWhiteboardClear, setConfirmWhiteboardClear] = useState(false);
 
   const [conversion, setConversion] = useState<{ text: string; alternatives: string[]; ids: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const { fullscreen, toggleFull } = props;
   const objectsRef = useRef(objects), edits = useRef(new InkHistory()), canvasRef = useRef<InkCanvasApi>(null), imageInput = useRef<HTMLInputElement>(null), rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!catalogue) return;
+    const editor = rootRef.current?.closest(".ink-editor"), body = editor?.querySelector(".ink-editor-body"); if (!body) return;
+    const update = () => setToolkitTop(Math.max(12, body.getBoundingClientRect().top));
+    update(); const observer = new ResizeObserver(update); observer.observe(editor!);
+    window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
+    return () => { observer.disconnect(); window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); };
+  }, [catalogue]);
   const restoreCommitScroll = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
     restoreCommitScroll.current?.();
     restoreCommitScroll.current = null;
   }, [objects]);
-  const penTimer = useRef<ReturnType<typeof setTimeout> | null>(null), draggedPen = useRef("");
+
   const path = objectPath(noteId, surface.id, page.id), pen = prefs.pens.find(p => p.id === penId) ?? prefs.pens.find(p => p.id === prefs.defaultPen) ?? prefs.pens[0];
   const draftRef = useRef<InkDraft | null>(null);
   const pageRef = useRef(page), onPageRef = useRef(props.onPage); pageRef.current = page; onPageRef.current = props.onPage;
@@ -323,64 +424,71 @@ function InkPageEditor(props: Props & { active: boolean; toolbarTarget: HTMLDivE
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (!props.active || (!rootRef.current?.contains(document.activeElement) && !props.toolbarTarget?.contains(document.activeElement) && !props.historyTarget?.contains(document.activeElement)) || target.closest("input, textarea, select") || target.isContentEditable || e.isComposing) return;
-      if (e.key === "Backspace" && tool === "lasso" && selected.length > 0) {
+      if (["Backspace", "Delete"].includes(e.key) && (tool === "lasso" || tool === "select") && selected.length > 0) {
         e.preventDefault(); e.stopPropagation();
         const ids = new Set(selected);
-        commit(objectsRef.current.filter(object => !ids.has(object.id)));
+        commit(removeObjects(objectsRef.current, new Set(objectsRef.current.filter(o => ids.has(o.id) && !o.board?.locked).map(o => o.id))));
         setSelected([]);
         return;
       }
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) { const next = ({v:"select",c:"connector",p:"pen",h:"pan",r:"shape",e:"eraser",t:"text"} as const)[e.key.toLowerCase() as "v"]; if (next) { e.preventDefault(); setTool(next); } }
       if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase())) {
         e.preventDefault(); e.stopPropagation(); history(e.key.toLowerCase() === "z" && !e.shiftKey);
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [history, commit, tool, selected, props.active, props.toolbarTarget, props.historyTarget]);
+  }, [history, commit, tool, selected, props.active, props.toolbarTarget, props.historyTarget, setTool]);
   const picked = objects.filter(o => selected.includes(o.id));
   const convertSelection = async () => { setConversion({ text: picked.map(o => o.text ?? "").filter(Boolean).join(" "), alternatives: [], ids: selected }); if (!canRecognizeHandwriting()) return; setBusy(true); onMessage("Recognizing on your tablet. The language model downloads on first use…"); try { const candidates = await recognizeHandwriting(picked); setConversion({ text: candidates[0] ?? "", alternatives: candidates.slice(1, 5), ids: selected }); onMessage("Review the recognized text before using it."); } catch (e) { onMessage(String(e)); } finally { setBusy(false); } };
   const rememberText = () => { if (!conversion?.text.trim()) return; const text = conversion.text.trim(); commit(objectsRef.current.map(o => o.id === conversion.ids[0] ? { ...o, text } : o)); };
   const createTaskFromInk = async () => { if (!conversion?.text.trim()) return; const now = Date.now(); await saveTask({ id: uid(), userId, type: "todo", title: conversion.text.trim().slice(0, 200), description: `${conversion.text}\n\nSource: /dashboard/notes/?note=${noteId}&surface=${surface.id}&page=${page.id}`, priority: "medium", goalId: "", dueDate: null, startDateTime: null, dueDateTime: null, startAllDay: false, dueAllDay: false, notificationDateTime: null, completed: false, completedAt: null, archived: false, sortOrder: now, createdAt: now }); rememberText(); setConversion(null); onMessage("Task created with a link back to this page."); };
   const changeSelection = (map: (o: InkObject) => InkObject) => commit(objectsRef.current.map(o => selected.includes(o.id) ? map(o) : o));
   const transform = (scale: number, degrees: number) => { const moved = new Map(transformObjects(picked, 0, 0, scale, degrees).map(o => [o.id, o])); commit(objectsRef.current.map(o => moved.get(o.id) ?? o)); };
-  const paste = () => { if (!inkClipboard.length) return; const copies = transformObjects(inkClipboard, 24, 24).map(o => ({ ...o, id: uid(), order: Date.now() })); commit([...objectsRef.current, ...copies]); setSelected(copies.map(o => o.id)); setTool("lasso"); };
+  const paste = () => { if (!inkClipboard.length) return; const copies = cloneObjects(inkClipboard, new Set(inkClipboard.map(o => o.id)), uid); commit([...objectsRef.current, ...copies]); setSelected(copies.map(o => o.id)); setTool("lasso"); };
   const sendImage = async () => { if (!picked.length) return; setBusy(true); try { const blob = await objectsPng(picked); const uploaded = await uploadNoteImage(userId, noteId, new File([blob], "Handwritten selection.png", { type: "image/png" })); props.onSend(`![Handwritten selection](${uploaded.downloadUrl})\n\n[Source: ${surface.name}, page ${page.label || props.pageNumber}](/dashboard/notes/?note=${noteId}&surface=${surface.id}&page=${page.id})`); } catch (e) { onMessage(String(e)); } finally { setBusy(false); } };
   const addImage = async (file: File) => { setBusy(true); try { const uploaded = await uploadNoteImage(userId, noteId, file); const bitmap = await createImageBitmap(file), width = Math.min(400, page.paper.width * .7), height = width * bitmap.height / bitmap.width; bitmap.close(); const object: InkObject = { id: uid(), kind: "image", points: [], color: "#000000", width: 1, opacity: 1, style: "pen", pressure: 0, order: Date.now(), x: 80, y: 80, w: width, h: height, url: uploaded.downloadUrl }; commit([...objectsRef.current, object]); setSelected([object.id]); setTool("lasso"); } catch (e) { onMessage(String(e)); } finally { setBusy(false); } };
   const highlightText = () => { const highlights: InkObject[] = pdfSelection.map(i => { const l = pdfLines[i]; return { id: uid(), kind: "stroke", points: [{ x: l.x, y: l.y + l.h * .55, p: .5, t: 0 }, { x: l.x + l.w, y: l.y + l.h * .55, p: .5, t: 1 }], width: l.h * 1.15, color: pen.style === "highlighter" ? pen.color : "#facc15", opacity: .3, style: "highlighter", pressure: 0, order: Date.now() }; }); commit([...objectsRef.current, ...highlights]); setPdfSelection([]); setTextMode(false); };
-  const addText = () => { if (!textDialog?.text.trim()) return; const existing = objectsRef.current.find(o => o.id === textDialog.id); const o: InkObject = { id: uid(), kind: "text", points: [], x: textDialog.x, y: textDialog.y, width: 20, color: pen.color, opacity: 1, pressure: 0, style: "pen", order: Date.now(), ...existing, w: Math.min(page.paper.width - textDialog.x, Math.max(...textDialog.text.split("\n").map(s => s.length)) * (existing?.width ?? 20) * .65), h: textDialog.text.split("\n").length * (existing?.width ?? 20) * 1.4, text: textDialog.text }; commit(existing ? objectsRef.current.map(v => v.id === existing.id ? o : v) : [...objectsRef.current, o]); setTextDialog(null); };
+  const addText = () => { if (!textDialog?.text.trim()) return; const existing = objectsRef.current.find(o => o.id === textDialog.id); const o: InkObject = { id: uid(), kind: "text", points: [], x: textDialog.x, y: textDialog.y, width: 20, color: pen.color, opacity: 1, pressure: 0, style: "pen", order: Date.now(), ...existing, w: Math.min(page.paper.width - textDialog.x, Math.max(...textDialog.text.split("\n").map(s => s.length)) * (existing?.width ?? 20) * .65), h: textDialog.text.split("\n").length * (existing?.width ?? 20) * 1.4, text: textDialog.text, ...(existing?.board ? { w: existing.w, h: existing.h, board: { ...existing.board, html: undefined } } : {}) }; commit(existing ? objectsRef.current.map(v => v.id === existing.id ? o : v) : [...objectsRef.current, o]); setTextDialog(null); };
 
   const viewControls = <div className="ink-view-controls"><button onClick={() => canvasRef.current?.fitWidth()} title="Fit width" aria-label="Fit width"><svg className="ink-tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 3H3V8M16 3H21V8M21 16V21H16M8 21H3V16" /><path d="M5 12H19M8 9L5 12L8 15M16 9L19 12L16 15" /></svg></button><button onClick={() => canvasRef.current?.fit()} title="Fit page" aria-label="Fit page"><svg className="ink-tool-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 3H3V8M16 3H21V8M21 16V21H16M8 21H3V16" /><rect x="8" y="6" width="8" height="12" rx="1" /></svg></button><><button onClick={() => canvasRef.current?.zoom(.8)} aria-label="Zoom out" title="Zoom out"><TbZoomOut className="ink-tool-icon" aria-hidden="true" /></button><button onClick={() => canvasRef.current?.zoom(1.25)} aria-label="Zoom in" title="Zoom in"><TbZoomIn className="ink-tool-icon" aria-hidden="true" /></button></><button onClick={() => void toggleFull()} title={fullscreen ? "Exit focus" : "Focus mode"} aria-label={fullscreen ? "Exit focus" : "Focus mode"}>{fullscreen ? <TbMinimize className="ink-tool-icon" aria-hidden="true" /> : <TbMaximize className="ink-tool-icon" aria-hidden="true" />}</button>{props.syncStatusTarget ? createPortal(<span className="ink-save-status" title={status} role="status" data-history={historyVersion}>{status}</span>, props.syncStatusTarget) : <span className="ink-save-status" title={status} role="status" data-history={historyVersion}>{status}</span>}</div>;
   const controls = <>
-    <div ref={penToolbarRef} className={`ink-toolbar${prefs.leftHanded ? " is-left-handed" : ""}${pensCollapsed ? " has-collapsed-pens" : ""}`} role="toolbar" aria-label="Handwriting tools">
+    <div className={surface.kind === "whiteboard" ? "ink-tools-row has-whiteboard-actions" : "ink-tools-row"}>
       {props.historyTarget && createPortal(<><button disabled={!edits.current.undo.length} onClick={() => history(true)} title="Undo (Ctrl+Z)">↶</button><button disabled={!edits.current.redo.length} onClick={() => history(false)} title="Redo (Ctrl+Shift+Z)">↷</button></>, props.historyTarget)}
-
-      {(pensCollapsed ? [pen] : prefs.pens).map(p => <button draggable onDragStart={() => { draggedPen.current = p.id; }} onDragOver={e => e.preventDefault()} onDrop={() => { const pens = [...prefs.pens]; const index = pens.findIndex(v => v.id === draggedPen.current); if (index < 0) return; const [moved] = pens.splice(index, 1); pens.splice(pens.findIndex(v => v.id === p.id), 0, moved); onPreferences({ ...prefs, pens }); }} key={p.id} className={`ink-preset${p.style === "fountain" ? " ink-preset-fountain" : ""}${tool === "pen" && p.id === pen.id ? " is-active" : ""}`} aria-label={`${p.name}, ${p.style}, ${p.width} pixels, ${p.color}, ${Math.round(p.opacity * 100)}% opacity`} aria-pressed={tool === "pen" && p.id === pen.id} title={`${p.name} · ${p.style} · ${p.width} px · ${p.color} · ${Math.round(p.opacity * 100)}% opacity · hold to edit`} aria-expanded={tool === "pen" && p.id === pen.id ? !pensCollapsed : undefined} onClick={() => { if (tool === "pen" && p.id === pen.id) setPensCollapsed(value => !value); setPenId(p.id); setTool("pen"); }} onDoubleClick={() => setEditingPen(p)} onPointerDown={() => { penTimer.current = setTimeout(() => setEditingPen(p), 500); }} onPointerUp={() => { if (penTimer.current) clearTimeout(penTimer.current); }} onPointerLeave={() => { if (penTimer.current) clearTimeout(penTimer.current); }} onContextMenu={e => { e.preventDefault(); setEditingPen(p); }}><PenPreview pen={p} />{p.id === prefs.defaultPen && <small>•</small>}</button>)}
-      <button onClick={() => { const p = { ...pen, id: uid(), name: "New pen" }; onPreferences({ ...prefs, pens: [...prefs.pens, p] }); setEditingPen(p); }} title="Add saved pen">+</button>
-      <button aria-pressed={tool === "eraser"} onClick={() => setTool("eraser")} title="Eraser" aria-label="Eraser"><TbEraser className="ink-tool-icon" aria-hidden="true" /></button>
-      {!prefs.compact && <>
-        <button aria-pressed={tool === "lasso"} onClick={() => setTool("lasso")} title="Lasso" aria-label="Lasso"><TbLasso className="ink-tool-icon" aria-hidden="true" /></button>
-        <button aria-pressed={tool === "shape"} onClick={() => setTool("shape")} title="Shapes" aria-label="Shapes"><TbGeometry className="ink-tool-icon" aria-hidden="true" /></button>
-        <button disabled={busy} onClick={() => imageInput.current?.click()} title="Insert image" aria-label="Insert image"><TbPhoto className="ink-tool-icon" aria-hidden="true" /></button>
-        <button aria-pressed={tool === "text"} onClick={() => setTool("text")} title="Text" aria-label="Text"><svg className="ink-tool-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4H20L20.5 9H19L18 6H13.5V18L16 18.5V20H8V18.5L10.5 18V6H6L5 9H3.5L4 4Z" fill="currentColor" /><path d="M5 23H19" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity=".35" /></svg></button>
-        <button aria-pressed={tool === "cover"} onClick={() => setTool("cover")} title="Cover: draw over answers, then use Study covers to hide and reveal them" aria-label="Cover answers for study"><TbEyeOff className="ink-tool-icon" aria-hidden="true" /></button>
-        <button aria-pressed={tool === "pan"} onClick={() => setTool("pan")} title="Pan" aria-label="Pan"><TbHandMove className="ink-tool-icon" aria-hidden="true" /></button>
-      </>}
-      <button className="ink-toolbar-toggle" aria-expanded={!prefs.compact} aria-label={prefs.compact ? "Expand toolbar" : "Collapse toolbar"} title={prefs.compact ? "Expand toolbar" : "Collapse toolbar"} onClick={() => onPreferences({ ...prefs, compact: !prefs.compact })}>{prefs.compact ? <TbArrowRight className="ink-tool-icon" aria-hidden="true" /> : <TbArrowLeft className="ink-tool-icon" aria-hidden="true" />}</button>
+    <InkToolbar prefs={prefs} pen={pen} tool={tool} setTool={next => { setTool(next); if (next === "shape" || next === "select" || next === "connector") setCatalogue(true); }} setPenId={setPenId} onPreferences={onPreferences} setEditingPen={setEditingPen} pensCollapsed={pensCollapsed} setPensCollapsed={setPensCollapsed} busy={busy} onImage={() => imageInput.current?.click()} onSticky={() => { setShape("sticky"); setTool("shape"); setCatalogue(true); }} />
+    {surface.kind === "whiteboard" && <div className={`whiteboard-action-dock${whiteboardDockOpen ? " is-open" : ""}`} onKeyDown={event => {
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setWhiteboardDockOpen(false); event.currentTarget.querySelector<HTMLButtonElement>(".whiteboard-dock-toggle")?.focus(); }
+    }}>
+      <button type="button" className="whiteboard-dock-toggle" onClick={() => setWhiteboardDockOpen(open => !open)} aria-label={whiteboardDockOpen ? "Close whiteboard actions" : "Open whiteboard actions"} aria-expanded={whiteboardDockOpen} aria-controls={`whiteboard-actions-${surface.id}-${page.id}`} title="Whiteboard actions">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="3" /><path d="M9 20l3-4 3 4" /><path className="whiteboard-dock-mark" d="M8 10h8M12 6v8" /></svg>
+      </button>
+      <div id={`whiteboard-actions-${surface.id}-${page.id}`} className="whiteboard-dock-actions" hidden={!whiteboardDockOpen} role="group" aria-label="Whiteboard actions">
+        <span className="whiteboard-dock-divider" aria-hidden="true" />
+        <button type="button" className="whiteboard-clear-action" disabled={!loaded || !objects.length || busy} onClick={() => setConfirmWhiteboardClear(true)} aria-label="Erase everything" title="Erase everything">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5" /></svg>
+        </button>
+        <button type="button" className="whiteboard-eraser" disabled={!loaded} aria-pressed={tool === "whiteboard-eraser"} onClick={() => setTool("whiteboard-eraser")} aria-label="Use whiteboard eraser" title="Whiteboard eraser · 70 px · partial"><TbEraser aria-hidden="true" /></button>
+      </div>
+    </div>}
     </div>
     {options && <div className="ink-modal-scrim" onClick={() => setOptions(false)} onKeyDown={e => { if (e.key === "Escape") { e.stopPropagation(); setOptions(false); } }}><section className="ink-dialog ink-workspace-settings" role="dialog" aria-modal="true" aria-label="Handwriting settings" onClick={e => e.stopPropagation()}><div className="ink-dialog-title"><h2>Settings</h2><button autoFocus aria-label="Close settings" onClick={() => setOptions(false)}>×</button></div><div className="ink-settings-tabs" role="tablist" aria-label="Settings sections"><button role="tab" aria-selected={settingsTab === "writing"} onClick={() => setSettingsTab("writing")}>Writing</button>{!page.pdfPage && <button role="tab" aria-selected={settingsTab === "paper"} onClick={() => setSettingsTab("paper")}>Paper</button>}<button role="tab" aria-selected={settingsTab === "view"} onClick={() => setSettingsTab("view")}>View</button></div>{settingsTab === "writing" ? <div role="tabpanel" aria-label="Writing" className="ink-writing-settings"><div className="ink-settings-grid"><label className="ink-check"><input type="checkbox" checked={prefs.enhancer} onChange={e => onPreferences({ ...prefs, enhancer: e.target.checked })} /> Stroke enhancer</label><label className="ink-check"><input type="checkbox" checked={prefs.holdShapes} onChange={e => onPreferences({ ...prefs, holdShapes: e.target.checked })} /> Hold to straighten</label><label>Finger input<select value={prefs.touch} onChange={e => onPreferences({ ...prefs, touch: e.target.value as InkPreferences["touch"] })}><option value="pan">Pan</option><option value="ignore">Two fingers only</option><option value="draw">Draw with finger</option></select></label><label className="ink-check"><input type="checkbox" checked={prefs.highlightBelow} onChange={e => onPreferences({ ...prefs, highlightBelow: e.target.checked })} /> Highlights below ink</label><label className="ink-check"><input type="checkbox" checked={prefs.leftHanded} onChange={e => onPreferences({ ...prefs, leftHanded: e.target.checked })} /> Reverse toolbar</label><button onClick={() => { setOptions(false); setEditingPen(pen); }}>Edit active pen</button>{page.pdfPage && <label className="ink-check"><input type="checkbox" checked={textMode} onChange={e => { setTextMode(e.target.checked); if (!e.target.checked) setPdfSelection([]); }} /> Select PDF text</label>}</div></div> : settingsTab === "view" ? <div role="tabpanel" aria-label="View"><div className="ink-view-options" role="group" aria-label="Page view">{([{ id: "default", name: "Default", detail: "Write and edit your page normally." }, { id: "study", name: "Study covers", detail: "Hide covered answers and tap to reveal them." }, { id: "annotations", name: "Annotations", detail: "Browse text labels, comments, and highlights." }] as const).map(mode => <button key={mode.id} aria-pressed={mode.id === "study" ? study : mode.id === "annotations" ? annotationsOpen : !study && !annotationsOpen} onClick={() => { setStudy(mode.id === "study"); setAnnotationsOpen(mode.id === "annotations"); }}><strong>{mode.name}</strong><small>{mode.detail}</small></button>)}</div></div> : <div role="tabpanel" aria-label="Paper">{page.pdfPage ? <p>Paper settings are fixed for imported PDF pages.</p> : <><PaperSettings defaultPaper={prefs.paper} paper={page.paper} courses={props.courses} onChange={paper => props.onPage({ ...page, paper })} /><div className="ink-actions"><button onClick={() => onPreferences({ ...prefs, paper: page.paper })}>Use as global default</button></div></>}</div>}<div className="ink-actions"><button className="ink-settings-export" onClick={props.onExport}><TbFileExport className="ink-tool-icon" aria-hidden="true" /> Export PDF</button><button onClick={() => setOptions(false)}>Done</button><small>Changes apply immediately.</small></div></section></div>}
-    {tool === "eraser" && <div className="ink-context"><button aria-pressed={!partial} onClick={() => setPartial(false)}>Whole stroke</button><button aria-pressed={partial} onClick={() => setPartial(true)}>Partial eraser</button><label>Size <input type="range" min="4" max="80" value={eraserSize} onChange={e => setEraserSize(Number(e.target.value))} /></label></div>}
-    {tool === "shape" && <div className="ink-context">{["line", "arrow", "rectangle", "ellipse", "triangle"].map(s => <button aria-pressed={shape === s} key={s} onClick={() => setShape(s)}>{s}</button>)}</div>}
-    {tool === "lasso" && <div className="ink-context"><button aria-pressed={rectangularLasso} onClick={() => setRectangularLasso(!rectangularLasso)}>{rectangularLasso ? "Rectangle selection" : "Freehand selection"}</button><span>{selected.length ? `${selected.length} selected` : "Draw around any part of your ink"}</span><button disabled={!inkClipboard.length} onClick={paste}>Paste</button>{picked.length > 0 && <><button onClick={() => { inkClipboard = structuredClone(picked); }}>Copy</button><button onClick={() => { inkClipboard = structuredClone(picked); commit(objectsRef.current.filter(o => !selected.includes(o.id))); setSelected([]); }}>Cut</button><button onClick={() => { inkClipboard = structuredClone(picked); paste(); }}>Duplicate</button><button onClick={() => { commit(objectsRef.current.filter(o => !selected.includes(o.id))); setSelected([]); }}>Delete</button>{picked.some(o => o.kind === "cover") && <button onClick={() => { const coverIds = new Set(objectsRef.current.filter(o => o.kind === "cover" && selected.includes(o.id)).map(o => o.id)); commit(objectsRef.current.filter(o => !coverIds.has(o.id))); setSelected(current => current.filter(id => !coverIds.has(id))); }}>Remove covers</button>}<button onClick={() => { const group = uid(); changeSelection(o => ({ ...o, group })); }}>Group</button><button onClick={() => changeSelection(o => ({ ...o, group: "" }))}>Ungroup</button><button onClick={() => transform(.9, 0)}>Smaller</button><button onClick={() => transform(1.1, 0)}>Larger</button><input type="color" aria-label="Recolour selected ink" value={picked[0]?.color ?? "#20242c"} onChange={e => changeSelection(o => ({ ...o, color: e.target.value }))} /><button onClick={() => changeSelection(o => ({ ...o, width: pen.width }))}>Pen thickness</button><button disabled={busy} onClick={() => void convertSelection()}>Convert to text</button><button className="ink-primary" disabled={busy} onClick={() => void sendImage()}>{busy ? "Uploading…" : "Insert into typed notes"}</button><button onClick={() => { void objectsPng(picked).then(blob => downloadBlob(blob, "handwritten-selection.png")).catch(e => onMessage(e.message)); }}>PNG</button><button onClick={() => { const b = objectBounds(picked)!; commit([...objectsRef.current, { id: uid(), kind: "cover", points: [], color: "#6366f1", width: 1, opacity: 1, style: "pen", pressure: 0, order: Date.now(), ...b }]); }}>Cover for study</button></>}</div>}
+    {tool === "eraser" && <InkEraserOptions partial={partial} setPartial={setPartial} eraserSize={eraserSize} setEraserSize={setEraserSize} />}
+
+    {tool === "lasso" && <div className="ink-context"><button aria-pressed={rectangularLasso} onClick={() => setRectangularLasso(!rectangularLasso)}>{rectangularLasso ? "Rectangle selection" : "Freehand selection"}</button><span>{selected.length ? `${selected.length} selected` : "Draw around any part of your ink"}</span><button disabled={!inkClipboard.length} onClick={paste}>Paste</button>{picked.length > 0 && <><button onClick={() => { inkClipboard = structuredClone(picked); }}>Copy</button><button onClick={() => { inkClipboard = structuredClone(picked); commit(removeObjects(objectsRef.current, new Set(picked.filter(o => !o.board?.locked).map(o => o.id)))); setSelected([]); }}>Cut</button><button onClick={() => { inkClipboard = structuredClone(picked); paste(); }}>Duplicate</button><button onClick={() => { commit(removeObjects(objectsRef.current, new Set(picked.filter(o => !o.board?.locked).map(o => o.id)))); setSelected([]); }}>Delete</button>{picked.some(o => o.kind === "cover") && <button onClick={() => { const coverIds = new Set(objectsRef.current.filter(o => o.kind === "cover" && selected.includes(o.id)).map(o => o.id)); commit(objectsRef.current.filter(o => !coverIds.has(o.id))); setSelected(current => current.filter(id => !coverIds.has(id))); }}>Remove covers</button>}<button onClick={() => { const group = uid(); changeSelection(o => ({ ...o, group })); }}>Group</button><button onClick={() => changeSelection(o => ({ ...o, group: "" }))}>Ungroup</button><button onClick={() => transform(.9, 0)}>Smaller</button><button onClick={() => transform(1.1, 0)}>Larger</button><input type="color" aria-label="Recolour selected ink" value={picked[0]?.color ?? "#20242c"} onChange={e => changeSelection(o => ({ ...o, color: e.target.value }))} /><button onClick={() => changeSelection(o => ({ ...o, width: pen.width }))}>Pen thickness</button><button disabled={busy} onClick={() => void convertSelection()}>Convert to text</button><button className="ink-primary" disabled={busy} onClick={() => void sendImage()}>{busy ? "Uploading…" : "Insert into typed notes"}</button><button onClick={() => { void objectsPng(picked).then(blob => downloadBlob(blob, "handwritten-selection.png")).catch(e => onMessage(e.message)); }}>PNG</button><button onClick={() => { const b = objectBounds(picked)!; commit([...objectsRef.current, { id: uid(), kind: "cover", points: [], color: "#6366f1", width: 1, opacity: 1, style: "pen", pressure: 0, order: Date.now(), ...b }]); }}>Cover for study</button></>}</div>}
     {props.viewControlsTarget ? createPortal(viewControls, props.viewControlsTarget) : viewControls}
     {page.pdfPage && textMode && <div className="ink-pdf-text"><p>Select text blocks from this page.</p><div className="ink-actions"><button onClick={() => { setTextMode(false); setPdfSelection([]); }}>Done</button><button disabled={!pdfSelection.length} onClick={highlightText}>Highlight</button><button disabled={!pdfSelection.length} onClick={() => props.onSend(pdfSelection.map(i => pdfLines[i].text).join(" ") + `\n\n[${surface.name}, page ${page.pdfPage}](/dashboard/notes/?note=${noteId}&surface=${surface.id}&page=${page.id})`)}>Send to typed notes</button><button disabled={!pdfSelection.length} onClick={() => void navigator.clipboard.writeText(pdfSelection.map(i => pdfLines[i].text).join(" ")).catch(e => onMessage(e.message))}>Copy</button></div>{pdfLines.length ? pdfLines.map((l, i) => <button key={i} aria-pressed={pdfSelection.includes(i)} onClick={() => setPdfSelection(current => current.includes(i) ? current.filter(v => v !== i) : [...current, i].sort((a, b) => a - b))}>{l.text || " "}</button>) : <p>This page has no selectable text. Use the highlighter on the page.</p>}</div>}
     {annotationsOpen && <div className="ink-pdf-text"><p>Labels, comments, and highlights on this page.</p>{objects.filter(o => o.text || o.style === "highlighter").map((o, i) => <div className="ink-actions" key={o.id}><button onClick={() => { setSelected([o.id]); setTool("lasso"); canvasRef.current?.fit(); }}>{o.text || `Highlight ${i + 1}`}</button>{o.kind === "text" && <button onClick={() => setTextDialog({ id: o.id, x: o.x ?? 0, y: o.y ?? 0, text: o.text ?? "" })}>Edit</button>}</div>)}</div>}
+    {surface.kind === "whiteboard" && whiteboardDockOpen && loaded && <WhiteboardMinimap sourceRef={rootRef} paper={page.paper} objects={objects} highlightBelow={prefs.highlightBelow} />}
   </>;
-  return <div ref={rootRef} tabIndex={0} className="ink-page-editor" onPaste={e => { const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (file) { e.preventDefault(); void addImage(file); } }} onDragOver={e => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={e => { const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith("image/")); if (file) { e.preventDefault(); void addImage(file); } }}>
+  return <div ref={rootRef} tabIndex={0} className={`ink-page-editor${surface.kind === "whiteboard" ? " ink-whiteboard-editor" : ""}`} onPaste={e => { const file = Array.from(e.clipboardData.files).find(f => f.type.startsWith("image/")); if (file) { e.preventDefault(); void addImage(file); } }} onDragOver={e => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); }} onDrop={e => { const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith("image/")); if (file) { e.preventDefault(); void addImage(file); } }}>
     {props.active && props.toolbarTarget && createPortal(controls, props.toolbarTarget)}
-    {loaded ? <InkCanvas continuous focusMode={fullscreen} ref={canvasRef} objects={objects} paper={page.paper} pen={pen} tool={tool} shape={shape} partialEraser={partial} eraserSize={eraserSize} enhancer={prefs.enhancer} touch={prefs.touch} selected={selected} onSelect={setSelected} onChange={commit} highlightBelow={prefs.highlightBelow} holdShapes={prefs.holdShapes} study={study} background={background} pdfLines={page.pdfPage ? pdfLines : undefined} onText={(x, y) => setTextDialog({ x, y, text: "" })} rectangularLasso={rectangularLasso} /> : <div className="ink-empty">Opening your ink…</div>}
+    {props.active && catalogue && <div className="canvas-toolkit-host" style={{ top: toolkitTop }}><CanvasSidebar style={picked[0]?.board ?? boardStyle} selected={picked} onClose={() => setCatalogue(false)} onCreate={(kind, patch) => { setShape(kind); setBoardStyle(v => ({ ...v, ...patch })); setSelected([]); setTool("shape"); }} onStyle={patch => { if (patch.fill && /^#[0-9a-f]{6}$/i.test(patch.fill) && !patch.textColor) { const hex = patch.fill.slice(1), luma = .2126 * parseInt(hex.slice(0, 2), 16) + .7152 * parseInt(hex.slice(2, 4), 16) + .0722 * parseInt(hex.slice(4, 6), 16); patch = { ...patch, textColor: luma < 135 ? "#ffffff" : "#203353" }; } setBoardStyle(v => ({ ...v, ...patch })); commit(objectsRef.current.map(o => selected.includes(o.id) && !o.board?.locked ? { ...o, board: { ...o.board, ...patch } } : o)); }} onAction={name => arrangeCanvas(name, objectsRef.current, selected, commit, setSelected)} onEdit={() => { const o = picked[0]; if (o?.kind === "shape" && !o.board?.locked) { setEditingObject(o.id); return; } if (o && !o.board?.locked) setTextDialog({ id: o.id, x: o.x ?? 0, y: o.y ?? 0, text: o.text ?? "" }); }} /></div>}
+    {loaded ? <InkCanvas buttonEraser={surface.kind === "whiteboard" ? "whiteboard-eraser" : "eraser"} continuous focusMode={fullscreen} ref={canvasRef} objects={objects} paper={page.paper} pen={pen} tool={tool} shape={shape} boardStyle={boardStyle} onTool={setTool} onEditObject={setEditingObject} partialEraser={partial} eraserSize={eraserSize} enhancer={prefs.enhancer} touch={prefs.touch} selected={selected} onSelect={setSelected} onChange={commit} highlightBelow={prefs.highlightBelow} holdShapes={prefs.holdShapes} study={study} background={background} pdfLines={page.pdfPage ? pdfLines : undefined} onText={(x, y) => setTextDialog({ x, y, text: "" })} rectangularLasso={rectangularLasso} /> : <div className="ink-empty">Opening your ink…</div>}
+    {confirmWhiteboardClear && <div className="ink-modal-scrim" onClick={() => setConfirmWhiteboardClear(false)}><section className="ink-dialog whiteboard-clear-dialog" role="alertdialog" aria-modal="true" aria-label="Erase whiteboard?" onClick={event => event.stopPropagation()}><h2>Erase this whiteboard?</h2><p>This removes all writing, shapes, images, and labels from the board. This action can be undone while the board remains open.</p><div className="ink-actions"><button autoFocus onClick={() => setConfirmWhiteboardClear(false)}>Cancel</button><button className="whiteboard-danger" onClick={() => { commit([]); setSelected([]); setConfirmWhiteboardClear(false); }}>Erase everything</button></div></section></div>}
     <input ref={imageInput} type="file" accept="image/*" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void addImage(file); }} />
     {editingPen && <PenSettings key={editingPen.id} pen={editingPen} onClose={() => setEditingPen(null)} onSave={p => onPreferences({ ...prefs, pens: prefs.pens.map(v => v.id === p.id ? p : v) })} onDefault={p => onPreferences({ ...prefs, defaultPen: p.id, pens: prefs.pens.map(v => v.id === p.id ? p : v) })} onDelete={() => { if (prefs.pens.length > 1) onPreferences({ ...prefs, pens: prefs.pens.filter(p => p.id !== editingPen.id), defaultPen: prefs.defaultPen === editingPen.id ? prefs.pens.find(p => p.id !== editingPen.id)!.id : prefs.defaultPen }); }} onDuplicate={p => onPreferences({ ...prefs, pens: [...prefs.pens, p] })} />}
     {conversion && <div className="ink-modal-scrim"><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Review handwriting text"><h2>Review handwriting</h2><p>{canRecognizeHandwriting() ? "Check the recognized text before inserting it. Your original ink stays editable." : "Automatic recognition runs in the Android tablet app. Add a transcription here to make this selection searchable."}</p><textarea autoFocus rows={6} aria-label="Recognized text" value={conversion.text} onChange={e => setConversion({ ...conversion, text: e.target.value })} />{conversion.alternatives.map((text, i) => <button key={i} onClick={() => setConversion({ ...conversion, text })}>{text}</button>)}<div className="ink-actions"><button className="ink-primary" disabled={busy || !conversion.text.trim()} onClick={() => { rememberText(); props.onSend(conversion.text); setConversion(null); }}>Send to typed notes</button><button disabled={!conversion.text.trim()} onClick={() => { rememberText(); setConversion(null); }}>Save searchable text</button><button disabled={!conversion.text.trim()} onClick={() => void createTaskFromInk().catch(e => onMessage(e.message))}>Create task</button><button onClick={() => setConversion(null)}>Cancel</button></div></section></div>}
+    {editingObject && objects.find(o => o.id === editingObject) && <div className="ink-modal-scrim"><section className="ink-dialog canvas-page-text-dialog canvas-toolkit-host" role="dialog" aria-modal="true" aria-label="Edit shape text"><CanvasTextEditor object={objects.find(o => o.id === editingObject)!} camera={{ x:0, y:0, scale:1 }} objects={objects} onClose={() => setEditingObject(null)} onSave={(html, text) => commit(objectsRef.current.map(o => o.id === editingObject ? { ...o, text, h: Math.max(o.h ?? 60, canvasTextHeight(html, o.w ?? 220, o.board?.fontSize ?? 20, "18px")), board: { ...o.board, html } } : o))} /></section></div>}
     {textDialog && <div className="ink-modal-scrim"><section className="ink-dialog" role="dialog" aria-modal="true" aria-label="Add text to page"><h2>Add a label or comment</h2><textarea autoFocus rows={5} value={textDialog.text} onChange={e => setTextDialog({ ...textDialog, text: e.target.value })} /><div className="ink-actions"><button className="ink-primary" onClick={addText}>Insert text</button><button onClick={() => setTextDialog(null)}>Cancel</button></div></section></div>}
   </div>;
 }

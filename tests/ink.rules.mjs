@@ -1,4 +1,5 @@
 import { before, after, test } from "node:test";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, updateDoc } from "firebase/firestore";
@@ -7,6 +8,15 @@ before(async () => { env = await initializeTestEnvironment({ projectId: "demo-in
 after(async () => env?.cleanup());
 const db = user => user ? env.authenticatedContext(user).firestore() : env.unauthenticatedContext().firestore();
 test("owner can create and query surfaces, pages and vector objects", async () => { for (const path of ["notes/lecture/surfaces/ink", "notes/lecture/surfaces/ink/pages/page", "notes/lecture/surfaces/ink/pages/page/objects/stroke"]) { await assertSucceeds(setDoc(doc(db("alice"), path), { id: path.split("/").at(-1) })); await assertSucceeds(getDoc(doc(db("alice"), path))); } await assertSucceeds(getDocs(collection(db("alice"), "notes/lecture/surfaces/ink/pages/page/objects"))); });
+test("canvas objects round-trip negative world coordinates, formatting, and connector bindings", async () => {
+  const path = "notes/lecture/surfaces/canvas/pages/page/objects/shape";
+  const value = { id: "shape", kind: "shape", x: -100000.25, y: 80000.5, w: 220, h: 140, board: { shape: "rounded", fill: "#dbeafe", fillOpacity: .35, html: "<b>Idea</b>" } };
+  await assertSucceeds(setDoc(doc(db("alice"), path), value));
+  const saved = (await getDoc(doc(db("alice"), path))).data();
+  assert.deepEqual(saved.board, value.board); assert.equal(saved.x, value.x);
+  await assertSucceeds(setDoc(doc(db("alice"), path.replace(/shape$/, "connector")), { id: "connector", kind: "connector", board: { from: { id: "shape", side: "right" }, end: { x: 250, y: -300 }, route: "elbow" } }));
+  await assertFails(getDoc(doc(db("bob"), path)));
+});
 test("other users cannot read, write, list, or delete a note's ink", async () => { const path = "notes/lecture/surfaces/ink/pages/page/objects/stroke"; for (const user of ["bob", null]) { await assertFails(getDoc(doc(db(user), path))); await assertFails(setDoc(doc(db(user), path), { userId: user })); await assertFails(deleteDoc(doc(db(user), path))); await assertFails(getDocs(collection(db(user), "notes/lecture/surfaces"))); } });
 test("missing parent does not authorize orphaned surface creation", async () => { await assertFails(setDoc(doc(db("alice"), "notes/missing/surfaces/ink"), { userId: "alice" })); });
 test("nested ink rules do not permit changing note ownership", async () => { await assertFails(updateDoc(doc(db("alice"), "notes/lecture"), { userId: "bob" })); });

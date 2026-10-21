@@ -39,7 +39,7 @@ export interface MarkdownNote {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
-  initialSurface?: "typed" | "ink" | "pdf";
+  initialSurface?: "typed" | "ink" | "whiteboard" | "canvas" | "pdf";
 }
 
 function asNumber(value: unknown, fallback = 0) {
@@ -73,7 +73,7 @@ function noteFromFirestore(id: string, data: Record<string, unknown>): MarkdownN
     sortOrder: asNumber(data.sortOrder),
     createdAt: asNumber(data.createdAt),
     updatedAt: asNumber(data.updatedAt),
-    initialSurface: data.initialSurface === "ink" || data.initialSurface === "pdf" ? data.initialSurface : "typed",
+    initialSurface: data.initialSurface === "ink" || data.initialSurface === "whiteboard" || data.initialSurface === "canvas" || data.initialSurface === "pdf" ? data.initialSurface : "typed",
   };
 }
 

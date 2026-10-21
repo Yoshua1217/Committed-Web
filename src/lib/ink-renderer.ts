@@ -1,4 +1,5 @@
 import { InkObject, Paper, Point, objectBounds } from "./ink-model";
+import { connection, shapePath } from "./canvas-model";
 
 const images = new Map<string, HTMLImageElement>();
 export function loadInkImage(url: string): Promise<HTMLImageElement> {
@@ -40,6 +41,33 @@ export function drawSegment(ctx: CanvasRenderingContext2D, o: InkObject, a: Poin
 }
 export function drawObject(ctx: CanvasRenderingContext2D, o: InkObject, study = false, revealed = false) {
   ctx.save(); ctx.globalAlpha = o.opacity;
+  if (o.kind === "shape") {
+    const s = o.board ?? {}, w = o.w ?? 220, h = o.h ?? 140;
+    ctx.translate(o.x ?? 0, o.y ?? 0);
+    const path = new Path2D(shapePath(s.shape ?? "rounded", w, h, s.radius));
+    if (s.shadow) { ctx.shadowColor="#00000022"; ctx.shadowBlur=12; ctx.shadowOffsetY=4; }
+    if (s.fill && s.fill !== "transparent" && s.shape !== "frame") { ctx.globalAlpha = o.opacity * (s.fillOpacity ?? 1); ctx.fillStyle = s.fill; ctx.fill(path); }
+    ctx.shadowColor="transparent"; ctx.shadowBlur=0; ctx.shadowOffsetY=0;
+    ctx.globalAlpha = o.opacity; ctx.strokeStyle = s.border ?? "#93b4e4"; ctx.lineWidth = s.borderWidth ?? 1.5;
+    if (s.dash === "dashed") ctx.setLineDash([8, 5]); else if (s.dash === "dotted") ctx.setLineDash([2, 5]);
+    if (ctx.lineWidth > 0 && s.borderWidth !== 0) ctx.stroke(path);
+    ctx.setLineDash([]); ctx.fillStyle = s.textColor ?? o.color; ctx.font = `${s.fontSize ?? 20}px system-ui`; ctx.textBaseline = "top"; ctx.textAlign = s.align ?? "center";
+    const lines: string[] = [], available = Math.max(20, w - 36);
+    for (const paragraph of (o.text ?? "").split("\n")) { let line = ""; for (const word of paragraph.split(" ")) { const next = line ? `${line} ${word}` : word; if (line && ctx.measureText(next).width > available) { lines.push(line); line = word; } else line = next; } lines.push(line); }
+    const lineHeight = (s.fontSize ?? 20) * 1.5, top = s.shape === "frame" ? -28 : ["text", "note", "sticky"].includes(s.shape ?? "") ? 18 : Math.max(18, (h - lines.length * lineHeight) / 2);
+    lines.forEach((line, i) => { const x=s.align === "left" ? 18 : s.align === "right" ? w - 18 : w / 2; if(s.textOutline) { ctx.strokeStyle=s.textColor ?? o.color; ctx.lineWidth=1; ctx.strokeText(line,x,top+i*lineHeight,available); } else ctx.fillText(line,x,top+i*lineHeight,available); });
+    ctx.restore(); return;
+  }
+  if (o.kind === "connector") {
+    const s = o.board ?? {}, c = connection(o, []);
+    ctx.strokeStyle = s.border ?? "#64748b"; ctx.lineWidth = s.borderWidth ?? 2; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    if (s.dash === "dashed") ctx.setLineDash([8, 6]); else if (s.dash === "dotted") ctx.setLineDash([2, 5]);
+    ctx.stroke(new Path2D(c.path)); ctx.setLineDash([]);
+    const arrow = (at: { x: number; y: number }, toward: { x: number; y: number }) => { const angle = Math.atan2(at.y - toward.y, at.x - toward.x); ctx.beginPath(); ctx.moveTo(at.x - 10 * Math.cos(angle - .5), at.y - 10 * Math.sin(angle - .5)); ctx.lineTo(at.x, at.y); ctx.lineTo(at.x - 10 * Math.cos(angle + .5), at.y - 10 * Math.sin(angle + .5)); ctx.stroke(); };
+    if (s.arrowEnd !== false) arrow(c.end, c.start); if (s.arrowStart) arrow(c.start, c.end);
+    if (o.text) { ctx.font = `${s.fontSize ?? 16}px system-ui`; ctx.textAlign = "center"; ctx.fillStyle = s.textColor ?? "#334155"; ctx.fillText(o.text, c.label.x, c.label.y - 10); }
+    ctx.restore(); return;
+  }
   if (o.kind === "stroke") {
     if (o.style === "fountain") {
       ctx.fillStyle = o.color; ctx.beginPath();
@@ -75,11 +103,12 @@ export function drawObject(ctx: CanvasRenderingContext2D, o: InkObject, study = 
   ctx.restore();
 }
 export function drawObjects(ctx: CanvasRenderingContext2D, objects: InkObject[], highlightBelow = true, study = false, revealed = new Set<string>()) {
+  const map = new Map(objects.map(o => [o.id, o]));
   const sorted = [...objects].sort((a, b) => {
-    const layer = (o: InkObject) => o.kind === "image" ? -2 : o.kind === "cover" ? 2 : highlightBelow && o.style === "highlighter" ? -1 : 0;
+    const layer = (o: InkObject) => o.kind === "shape" ? -4 : o.kind === "connector" ? -3 : o.kind === "image" ? -2 : o.kind === "cover" ? 2 : highlightBelow && o.style === "highlighter" ? -1 : 0;
     return layer(a) - layer(b) || a.order - b.order || a.id.localeCompare(b.id);
   });
-  for (const o of sorted) drawObject(ctx, o, study, study && revealed.has(o.id));
+  for (const o of sorted) { const c = o.kind === "connector" ? connection(o, map) : null; drawObject(ctx, c ? { ...o, board: { ...o.board, start: c.start, end: c.end } } : o, study, study && revealed.has(o.id)); }
 }
 export function drawPaper(ctx: CanvasRenderingContext2D, paper: Paper) {
   const { width: w, height: h, spacing: s, kind } = paper;

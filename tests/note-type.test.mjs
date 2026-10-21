@@ -17,9 +17,10 @@ function fixture(kind, initialSurfaces = [], content = "", remembered) {
   const paper = { width: 816, height: 1056 };
   const dependencies = {
     react,
+    "./drawing-block-context": { DrawingBlockContext: { Provider: "DrawingProvider" } },
     "react-dom": { createPortal: value => value },
-    "next/dynamic": { default: () => "InkEditor" },
-    "@/lib/ink-model": { DEFAULT_INK_PREFERENCES: { paper }, courseForNotebook: () => null, uid: () => `id-${++sequence}`, newPage: (paper, order) => ({ id: `page-${++sequence}`, paper, order }) },
+    "next/dynamic": { default: loader => loader.toString().includes("canvas-page") ? "CanvasPage" : "InkEditor" },
+    "@/lib/ink-model": { DEFAULT_INK_PREFERENCES: { paper }, WHITEBOARD_PAPER: { width: 2600, height: 1600 }, courseForNotebook: () => null, uid: () => `id-${++sequence}`, newPage: (paper, order) => ({ id: `page-${++sequence}`, paper, order }) },
     "@/lib/ink-service": {
       surfacePath: () => "surfaces", pagePath: (_, id) => `pages/${id}`, coursesPath: () => "courses",
       listenInk(path, callback) { if (path === "surfaces") { receive = callback; callback([...records.values()]); } else callback([]); return () => {}; },
@@ -173,4 +174,48 @@ test("closing the last handwritten page does not fall back to a phantom text pag
   assert.equal(tabs(tree).length, 0);
   assert.equal(nodes(tree, node => node.props?.className === "ink-main-typed").length, 0);
   assert.ok(nodes(tree, node => node.props?.children === "No pages open. Use + to add or restore a page.").length);
+});
+
+test("typed drawing blocks create an independent hidden surface without changing active tabs", () => {
+  const f = fixture("typed", [{id:"main",kind:"typed",name:"Notes",order:0}]);
+  const tree=f.render(), marker=tree.props.value.create();
+  assert.match(marker, /\[Drawing\]\(committed-drawing:drawing-id-/);
+  const surface=f.writes.find(w=>w.path==="surfaces" && w.value.id.startsWith("drawing-"));
+  assert.equal(surface.value.kind,"canvas"); assert.equal(surface.value.hidden,true);
+  assert.ok(f.writes.some(w=>w.path===`pages/${surface.value.id}`));
+});
+
+test("whiteboard and infinite canvas bootstrap distinct editors and pages", () => {
+  for (const [kind, name, editor] of [["whiteboard", "Whiteboard", "InkEditor"], ["canvas", "Infinite canvas", "CanvasPage"]]) {
+    const f = fixture(kind), tree = f.render();
+    assert.deepEqual(tabs(tree).map(tab => tab.props.children[1]), [name]);
+    assert.equal(nodes(tree, node => node.type === editor)[0].props.surface.kind, kind);
+    assert.equal(nodes(tree, node => node.type === (editor === "InkEditor" ? "CanvasPage" : "InkEditor")).length, 0);
+    assert.equal(f.writes.filter(w => w.path === `pages/${kind}`).length, 1);
+    assert.deepEqual(f.writes.find(w => w.path === `pages/${kind}`).value.paper, { width: 2600, height: 1600 });
+  }
+});
+
+test("existing whiteboards reopen in the original editor without rewriting data", () => {
+  const surface = { id: "whiteboard", kind: "whiteboard", name: "My board", order: 0 };
+  const f = fixture("whiteboard", [surface]), tree = f.render();
+  assert.deepEqual(nodes(tree, node => node.type === "InkEditor")[0].props.surface, surface);
+  assert.equal(nodes(tree, node => node.type === "CanvasPage").length, 0);
+  assert.equal(f.writes.length, 0);
+});
+
+test("the add menu creates whiteboard and infinite canvas independently in one note", async () => {
+  const f = fixture("typed", [{ id: "main", kind: "typed", name: "Notes", order: -1 }]);
+  for (const [label, kind, editor] of [["▭ Whiteboard", "whiteboard", "InkEditor"], ["∞ Infinite canvas", "canvas", "CanvasPage"]]) {
+    let tree = f.render();
+    nodes(tree, node => node.props?.["aria-label"] === "Add a surface")[0].props.onClick();
+    tree = f.render();
+    await button(tree, label).props.onClick();
+    tree = f.render();
+    assert.equal(nodes(tree, node => node.type === editor)[0].props.surface.kind, kind);
+  }
+  const tree = f.render();
+  assert.deepEqual(tabs(tree).map(tab => tab.props.children[1]), ["Notes", "Whiteboard", "Infinite canvas"]);
+  tabs(tree).find(tab => tab.props.children[1] === "Whiteboard").props.onClick();
+  assert.equal(nodes(f.render(), node => node.type === "InkEditor")[0].props.surface.kind, "whiteboard");
 });
