@@ -1,5 +1,8 @@
 .infinite-canvas { --cv-ink:var(--primary); --cv-muted:var(--secondary); --cv-accent:var(--primary); --cv-border:var(--border); display:flex; flex-direction:column; height:calc(100dvh - 190px); min-height:560px; flex:1 1 auto; min-width:0; overflow:hidden; background:var(--background); color:var(--cv-ink); font-family:var(--font-body); border:1px solid var(--cv-border); border-radius:14px; isolation:isolate; }
 .infinite-canvas * { box-sizing:border-box; }
+.canvas-page-controls,.infinite-canvas>.ink-toolbar { flex-shrink:0; }
+.canvas-page-actions { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.canvas-page-controls>.ink-top-history { margin-left:0; }
 :is(.canvas-body,.canvas-topbar,.canvas-toolkit-host) button,:is(.canvas-body,.canvas-topbar,.canvas-toolkit-host) input,:is(.canvas-body,.canvas-topbar,.canvas-toolkit-host) select { font:inherit; }
 :is(.canvas-body,.canvas-topbar,.canvas-toolkit-host) button { display:inline-flex; align-items:center; justify-content:center; gap:7px; border:1px solid transparent; background:transparent; color:inherit; cursor:pointer; border-radius:8px; min-height:32px; padding:6px; transition:background .12s,color .12s,box-shadow .12s; }
 :is(.canvas-body,.canvas-topbar,.canvas-toolkit-host) button:hover { background:var(--surface-variant); color:var(--primary); }

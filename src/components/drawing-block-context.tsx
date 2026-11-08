@@ -11,7 +11,7 @@ export const DrawingBlockContext = createContext<{
 export function DrawingInsertButton({ onInsert }: { onInsert?: (source: string) => void }) {
   const drawing = useContext(DrawingBlockContext);
   if (!drawing) return null;
-  return <button type="button" title="Insert drawing block" aria-label="Insert drawing block" onClick={() => (onInsert ?? drawing.insert)(drawing.create())}><TbGeometry size={18} /><span>Drawing</span></button>;
+  return <button type="button" className="notes-drawing-insert" title="Insert drawing block" aria-label="Insert drawing block" onClick={() => (onInsert ?? drawing.insert)(drawing.create())}><TbGeometry size={18} /><span>Drawing</span></button>;
 }
 
 export function DrawingBlock({ id }: { id: string }) {

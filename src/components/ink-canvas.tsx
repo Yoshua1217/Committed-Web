@@ -181,10 +181,25 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     let diagram: PageDiagramGesture | null = null;
     let active: number | null = null, stroke: InkObject | null = null, polygon: Point[] = [], start: Point | null = null, previous: Point | null = null;
     let working = latest.current.objects, initial = working, moving = false, resizing = false, erasing = false, pointerIsPen = false, holdTimer: ReturnType<typeof setInterval> | undefined;
+    // Native events can commit several gestures before React supplies new props.
+    // Retain those commits so a tool switch cannot resurrect erased ink or drop
+    // the preceding stroke. A new objects prop still accepts undo/remote edits.
+    let sourceObjects = latest.current.objects, committedObjects = sourceObjects;
+    const objectsNow = () => {
+      if (latest.current.objects !== sourceObjects) { sourceObjects = latest.current.objects; committedObjects = sourceObjects; }
+      return committedObjects;
+    };
+    const publish = (objects: InkObject[]) => {
+      committedObjects = objects;
+      latest.current.onChange(objects);
+      sourceObjects = latest.current.objects;
+    };
     let movingIds: string[] = [];
     let rotating = false;
     let gestureTool: InkTool = latest.current.tool;
     let lastPenEvent: PointerEvent | null = null;
+    let lastPenInputTime = -Infinity, lastStrokeSampleTime = -Infinity;
+    let lastStrokeSamples: PointerEvent[] = [];
     const pointerTool = (e: PointerEvent): InkTool => penEraserHeld(e, e.pointerType === "pen" ? nativePenButtonHeld() : null) ? latest.current.buttonEraser ?? "eraser" : latest.current.tool;
     let rect = viewport.getBoundingClientRect(), lastPenTime = -Infinity, held = false, heldKind = "line";
     let holdAnchor: Point | null = null, holdSince = 0, holdAttempted = false;
@@ -195,7 +210,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     let painted: InkObject[] = [], paintedSelection = "", paintedBelow = true, paintedStudy = false, paintedWidth = 0;
     let navigation: { x: number; y: number; distance: number; view: typeof view.current } | null = null;
     const clear = () => liveCtx.clearRect(0, 0, latest.current.paper.width, latest.current.paper.height);
-    const paint = (objects = latest.current.objects, selection = latest.current.selected) => {
+    const paint = (objects = objectsNow(), selection = latest.current.selected) => {
       if (latest.current.study && !wasStudying) revealed.clear();
       wasStudying = latest.current.study;
       const selectionKey = selection.join(",");
@@ -231,6 +246,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
     const position = (e: PointerEvent): Point => ({ x: Math.max(0, Math.min(latest.current.paper.width, (e.clientX - rect.left - view.current.x) / view.current.scale)), y: Math.max(0, Math.min(latest.current.paper.height, (e.clientY - rect.top - view.current.y) / view.current.scale)), p: e.pointerType === "pen" ? e.pressure || .5 : .5, t: e.timeStamp });
     const navStart = () => { const [a, b] = [...touches.values()]; if (!a) { navigation = null; return; } navigation = { x: b ? (a.x + b.x) / 2 : a.x, y: b ? (a.y + b.y) / 2 : a.y, distance: b ? Math.hypot(a.x - b.x, a.y - b.y) : 0, view: { ...view.current } }; };
     const end = (e: PointerEvent, atPointer = true) => {
+      if (e.pointerType === "pen") lastPenInputTime = Math.max(lastPenInputTime, e.timeStamp);
       if (atPointer && e.pointerType === "pen") lastPenEvent = null;
       if (touches.delete(e.pointerId)) {
         if (e.pointerType === "pen") { lastPenTime = performance.now(); pointerIsPen = false; }
@@ -245,7 +261,7 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         const next = canceled ? diagram.before : diagram.objects;
         const selection = canceled ? [] : diagram.selected;
         diagram = null; moving = false; active = null; gestureActive.current = false; start = null; paintedWidth = 0; clear();
-        options.onChange(next); options.onSelect(selection); paint(next, selection);
+        publish(next); options.onSelect(selection); paint(next, selection);
         if (!canceled && (gestureTool === "shape" || gestureTool === "connector")) options.onTool?.("select");
         if (!canceled && gestureTool === "shape" && ["text", "sticky", "note"].includes(options.shape) && selection[0]) options.onEditObject?.(selection[0]);
         refreshResolution.current();
@@ -261,12 +277,12 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         // final stroke once, without repainting all earlier handwriting.
         const snapped = !canceled && options.tool === "pen" ? snapPdfHighlight(stroke, options.pdfLines ?? []) : stroke;
         const finalStroke = snapped !== stroke ? snapped : options.enhancer && options.tool === "pen" && !held ? { ...stroke, points: enhancePoints(stroke.points, options.pen.smoothing) } : stroke;
-        working = [...latest.current.objects, finalStroke]; paint(working, []); clear();
+        working = [...objectsNow(), finalStroke]; paint(working, []); clear();
         active = null; gestureActive.current = false;
-        options.onChange(working); options.onSelect([]);
+        publish(working); options.onSelect([]);
       } else if (polygon.length >= 3) {
-        const result = lassoObjects(latest.current.objects, polygon); options.onChange(result.objects); options.onSelect(result.selected); paint(result.objects, result.selected);
-      } else if (moving || erasing) { options.onChange(working); }
+        const result = lassoObjects(objectsNow(), polygon); publish(result.objects); options.onSelect(result.selected); paint(result.objects, result.selected);
+      } else if (moving || erasing) { publish(working); }
       active = null; stroke = null; polygon = []; moving = false; resizing = false; erasing = false; start = null; gestureActive.current = false; clear();
       refreshResolution.current();
       if (pointerIsPen) lastPenTime = performance.now(); pointerIsPen = false;
@@ -310,18 +326,19 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       cursor.style.width = `${size}px`; cursor.style.height = `${size}px`;
       cursor.style.transform = `translate(${e.clientX - bounds.left - size / 2}px, ${e.clientY - bounds.top - size / 2}px)`;
     };
-    const down = (e: PointerEvent, objects = latest.current.objects) => {
+    const down = (e: PointerEvent, objects = objectsNow()) => {
       if ((e.target as HTMLElement).closest(".ink-zoom-controls")) return;
       if (pointerTool(e) === "select") {
         const target = e.target as HTMLElement, check = target.closest<HTMLElement>("[data-canvas-check]"), parent = check?.closest("[data-object-id]");
         if (check && parent) {
           const object=objects.find(o=>o.id===parent.getAttribute("data-object-id"));
-          if(object && !object.board?.locked) { const index=Array.from(parent.querySelectorAll("[data-canvas-check]")).indexOf(check), html=toggleCanvasCheck(object.board?.html ?? "",index); latest.current.onChange(objects.map(o=>o.id===object.id?{...o,text:canvasPlainText(html),board:{...o.board,html}}:o)); }
+          if(object && !object.board?.locked) { const index=Array.from(parent.querySelectorAll("[data-canvas-check]")).indexOf(check), html=toggleCanvasCheck(object.board?.html ?? "",index); publish(objects.map(o=>o.id===object.id?{...o,text:canvasPlainText(html),board:{...o.board,html}}:o)); }
           e.preventDefault(); return;
         }
         if (target.closest(".page-diagram-layer a")) return;
       }
       if (e.pointerType === "pen") lastPenEvent = e;
+      if (e.pointerType === "pen") lastPenInputTime = Math.max(lastPenInputTime, e.timeStamp);
       if (e.pointerType === "pen" && !penInContact(e)) { updateCursor(e); return; }
       setZoomOpen(false);
       if (e.button !== 0 && e.pointerType !== "pen") return;
@@ -395,10 +412,18 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       const widths = fountainWidths(pen);
       if (pen.style === "fountain") start.pool = widths.min / pen.width;
       stroke = { id: uid(), kind: "stroke", points: [start], color: pen.color, width: pen.width, ...(pen.style === "fountain" ? { minWidth: widths.min, maxWidth: widths.max } : {}), opacity: pen.opacity, style: pen.style, pressure: pen.pressure, order: Date.now() };
+      lastStrokeSampleTime = e.timeStamp;
+      lastStrokeSamples = [e];
       trackHold(start); holdTimer = setInterval(tickHold, 40);
       live.style.opacity = String(stroke.opacity); drawObject(liveCtx, { ...stroke, opacity: 1 });
     };
     const move = (e: PointerEvent) => {
+      // Consume both streams: rawupdate support does not guarantee delivery.
+      // A later pointermove may repeat raw samples, or contain missing ones.
+      if (e.pointerType === "pen") {
+        if (e.timeStamp < lastPenInputTime) return;
+        lastPenInputTime = e.timeStamp;
+      }
       if (e.pointerType === "pen") lastPenEvent = e;
       // Keep the eraser footprint visible through contact, including native raw
       // pen updates; regular pen cursors still disappear while writing.
@@ -444,7 +469,6 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         view.current = { scale, x: x - rect.left - (navigation.x - rect.left - navigation.view.x) * scale / navigation.view.scale, y: y - rect.top - (navigation.y - rect.top - navigation.view.y) * scale / navigation.view.scale }; applyView(); return;
       }
       if (active !== e.pointerId || !start) return;
-      if (rawInput && pointerIsPen && e.type === "pointermove") { e.preventDefault(); return; }
       e.preventDefault(); const options = { ...latest.current, tool: gestureTool }, p = position(e);
       if (diagram) { working = diagram.move(p, view.current.scale, e.shiftKey, e.altKey); paint(working, diagram.selected); return; }
       if (erasing) {
@@ -465,6 +489,13 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
       if (options.tool === "shape" || options.tool === "cover" || held) { stroke.points = shapePoints(options.tool === "shape" ? options.shape : options.tool === "cover" ? "rectangle" : "line", start, p); clear(); drawObject(liveCtx, { ...stroke, opacity: 1 }); return; }
       const samples = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [];
       for (const sample of samples.length ? samples : [e]) {
+        if (pointerIsPen) {
+          if (sample.timeStamp < lastStrokeSampleTime) continue;
+          if (sample.timeStamp > lastStrokeSampleTime) { lastStrokeSampleTime = sample.timeStamp; lastStrokeSamples = []; }
+          // Distinct hardware samples may share a millisecond timestamp.
+          if (lastStrokeSamples.some(prior => prior.clientX === sample.clientX && prior.clientY === sample.clientY)) continue;
+          lastStrokeSamples.push(sample);
+        }
         const point = position(sample), last = stroke.points.at(-1)!;
         trackHold(point);
         if (Math.hypot(point.x - last.x, point.y - last.y) < .12) { if (holdAnchor === point) holdAnchor = last; continue; }
@@ -472,15 +503,17 @@ const InkCanvas = forwardRef<InkCanvasApi, Props>(function InkCanvas(props, apiR
         stroke.points.push(point); drawSegment(liveCtx, stroke, last, point);
       }
       // Bound a single Firestore object without dropping a long continuous stroke.
-      if (stroke.points.length >= 4000) { const part = stroke; options.onChange([...latest.current.objects, part]); drawObject(ctx, part); clear(); stroke = { ...part, id: uid(), points: [{ ...part.points.at(-1)! }], order: Date.now() }; holdAnchor = null; trackHold(stroke.points[0]); }
+      if (stroke.points.length >= 4000) { const part = stroke; publish([...objectsNow(), part]); drawObject(ctx, part); clear(); stroke = { ...part, id: uid(), points: [{ ...part.points.at(-1)! }], order: Date.now() }; holdAnchor = null; trackHold(stroke.points[0]); }
 
     };
     const wheel = (e: WheelEvent) => { if (documentViewRef.current) return; if (e.ctrlKey || e.metaKey) { e.preventDefault(); zoom(Math.exp(-e.deltaY * .005)); } else if (!latest.current.continuous) { e.preventDefault(); view.current.x -= e.deltaX; view.current.y -= e.deltaY; applyView(); } };
     const rawMove = (event: Event) => { const pointer = event as PointerEvent; if (pointer.pointerType === "pen") move(pointer); };
     const nativeButtonChange = () => {
       if (!lastPenEvent) return;
-      if (active === lastPenEvent.pointerId || touches.has(lastPenEvent.pointerId)) move(lastPenEvent);
-      else updateCursor(lastPenEvent);
+      // Notifications are asynchronous and contain no position/contact sample.
+      // Replaying the previous contact can erase during hover or create a dot
+      // on release. Apply tool changes on the next actual pointer event.
+      updateCursor(lastPenEvent);
     };
     const leave = () => { if (active === null) lastPenEvent = null; if (cursorRef.current) cursorRef.current.style.display = "none"; };
     window.addEventListener("committed-pen-button", nativeButtonChange);

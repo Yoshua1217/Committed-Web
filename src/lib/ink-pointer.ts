@@ -11,6 +11,7 @@ export function nativePenButtonHeld(): boolean | null {
 }
 
 /** A barrel-button press while hovering must never edit the page. */
-export function penInContact(event: { buttons: number }) {
-  return Boolean(event.buttons & (1 | 32));
+export function penInContact(event: { buttons: number; pressure?: number }) {
+  // Some WebViews retain a tip bit briefly after lift. Hover has no pressure.
+  return Boolean(event.buttons & (1 | 32)) && (event.pressure === undefined || event.pressure > 0);
 }

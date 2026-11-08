@@ -269,7 +269,6 @@
 .notes-document:has(.note-workspace) > .notes-document-title-row .notes-title-input { font-size: 28px; }
 .notes-document:has(.note-workspace) > .notes-document-meta { margin-bottom: 16px; }
 .note-workspace:not(.has-split) .ink-main-typed { width: 100%; max-width: none; margin: 0; }
-.has-split .notes-compose-grid { grid-template-columns: 1fr; }
 .ink-ui textarea.notes-markdown-editor { width: 100%; padding: 0 0 20vh; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 15px; font-weight: 450; letter-spacing: -.005em; line-height: 1.82; }
 .ink-ui .ink-extra-typed textarea { border: 0; border-radius: 0; background: transparent; padding: 0; }
 .has-split .ink-main-typed { padding: 16px; background: var(--background); }

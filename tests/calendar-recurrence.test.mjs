@@ -48,12 +48,21 @@ test("custom intervals, multiple weekdays, and occurrence limits include the fir
 
 test("end dates are inclusive in the event timezone and date-only for all-day events", () => {
   const rule = { ...preset("weekly"), ends: "on", until: "2026-11-02" };
-  assert.match(build(rule)[0], /UNTIL=20261103T065959Z$/);
+  assert.match(build(rule)[0], /UNTIL=20261103T055959Z$/);
   assert.match(build(rule, start, true)[0], /UNTIL=20261102$/);
   assert.equal(readRecurrence(build(rule), start, zone).until, "2026-11-02");
   assert.match(build({ ...rule, until: start })[0], /UNTIL=20260908T055959Z$/);
 });
 
+// Alberta stops changing clocks in November 2026. Keep historical DST
+// coverage as well as the current UTC-06 recurrence cutoff above.
+test("recurrence end dates retain historical winter offsets", () => {
+  const historicalStart = "2025-09-01";
+  const rule = { ...preset("weekly", historicalStart), ends: "on", until: "2025-11-03" };
+  const lines = build(rule, historicalStart);
+  assert.match(lines[0], /UNTIL=20251104T065959Z$/);
+  assert.equal(readRecurrence(lines, historicalStart, zone).until, "2025-11-03");
+});
 test("monthly day, ordinal weekday, last weekday, and leap day remain calendar based", () => {
   assert.match(build(preset("monthly", "2026-01-31"), "2026-01-31")[0], /BYMONTHDAY=31/);
   assert.match(build({ ...preset("monthly"), monthlyMode: "weekday" })[0], /BYDAY=1MO/);

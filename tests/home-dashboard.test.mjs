@@ -46,9 +46,26 @@ test("Events honor the mapped layer, exclusive all-day ends, midnight overlaps a
   assert.deepEqual(homeEvents(events, null, today), []);
 });
 
-test("Events use local calendar days across the daylight-saving transition", () => {
-  const events = [event("late", { dateTime: "2026-11-02T06:30:00Z" }, { dateTime: "2026-11-02T06:45:00Z" }), event("next", { dateTime: "2026-11-02T07:00:00Z" }, { dateTime: "2026-11-02T07:15:00Z" })];
+test("Events use local calendar days across a historical fall-back transition", () => {
+  const events = [event("late", { dateTime: "2025-11-03T06:30:00Z" }, { dateTime: "2025-11-03T06:45:00Z" }), event("next", { dateTime: "2025-11-03T07:00:00Z" }, { dateTime: "2025-11-03T07:15:00Z" })];
+  assert.deepEqual(homeEvents(events, "personal", "2025-11-02").map((item) => item.id), ["late"]);
+  assert.deepEqual(homeEvents(events, "personal", "2025-11-03").map((item) => item.id), ["next"]);
+});
+
+test("Events keep Alberta's UTC-06 midnight boundary after November 2026", () => {
+  const events = [event("late", { dateTime: "2026-11-02T05:30:00Z" }, { dateTime: "2026-11-02T05:45:00Z" }), event("next", { dateTime: "2026-11-02T06:00:00Z" }, { dateTime: "2026-11-02T06:15:00Z" })];
   assert.deepEqual(homeEvents(events, "personal", "2026-11-01").map((item) => item.id), ["late"]);
+  assert.deepEqual(homeEvents(events, "personal", "2026-11-02").map((item) => item.id), ["next"]);
+});
+
+test("Events respect both midnight boundaries on the shorter spring-forward day", () => {
+  const events = [
+    event("previous", { dateTime: "2026-03-08T06:30:00Z" }, { dateTime: "2026-03-08T06:45:00Z" }),
+    event("first", { dateTime: "2026-03-08T07:00:00Z" }, { dateTime: "2026-03-08T07:15:00Z" }),
+    event("late", { dateTime: "2026-03-09T05:30:00Z" }, { dateTime: "2026-03-09T05:45:00Z" }),
+    event("next", { dateTime: "2026-03-09T06:00:00Z" }, { dateTime: "2026-03-09T06:15:00Z" }),
+  ];
+  assert.deepEqual(homeEvents(events, "personal", "2026-03-08").map((item) => item.id), ["first", "late"]);
 });
 
 test("Recent notes are the latest five edits regardless of manual notebook ordering", () => {

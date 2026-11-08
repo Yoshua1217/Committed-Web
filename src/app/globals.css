@@ -1109,10 +1109,12 @@ body.notes-sidebar-resizing .notes-workspace { transition: none; }
 .notes-document-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin: 15px 0 31px; color: var(--secondary); font-size: 9px; font-weight: 650; letter-spacing: .025em; }
 .notes-document-meta span:not(:last-child)::after { content: ""; width: 3px; height: 3px; display: inline-block; margin-left: 9px; border-radius: 50%; background: var(--border); vertical-align: 2px; }
 .notes-editor-area { position: relative; }
-.notes-format-strip { height: 38px; display: flex; align-items: center; gap: 2px; margin: 0 0 8px -8px; opacity: .7; transition: opacity .15s ease; }
+.notes-format-strip { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 12px; opacity: .7; transition: opacity .15s ease; }
 .notes-editor-area:focus-within .notes-format-strip, .notes-format-strip:hover { opacity: 1; }
-.notes-format-strip button { width: 31px; height: 31px; min-height: 0; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--secondary); cursor: pointer; }
-.notes-format-strip button:hover { background: var(--surface-variant); color: var(--primary); }
+.notes-editor-area .notes-format-strip button { flex-shrink: 0; width: 31px; height: 31px; min-height: 31px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--secondary); cursor: pointer; }
+.notes-editor-area .notes-format-strip button:hover { background: var(--surface-variant); color: var(--primary); }
+.notes-editor-area .notes-format-strip .notes-drawing-insert { width: auto; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; white-space: nowrap; }
+.notes-format-strip .notes-drawing-insert svg { flex-shrink: 0; }
 .notes-format-strip > span { width: 1px; height: 17px; margin: 0 4px; background: var(--border); }
 .notes-editor-area { container-type: inline-size; }
 .notes-compose-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .9fr); align-items: start; gap: 20px; }
@@ -1367,10 +1369,9 @@ body.notes-sidebar-resizing .notes-workspace { transition: none; }
 }
 
 /* Respond to the editor's actual width, including app and OS split views. */
-@container (max-width: 900px) {
+@container (max-width: 640px) {
   .notes-compose-grid { grid-template-columns: minmax(0, 1fr); }
-  .notes-compose-grid:not(.is-preview-closed) .notes-source-pane { grid-row: 2; }
-  .notes-live-preview { grid-row: 1; position: relative; top: auto; max-height: 30dvh; padding: 12px 14px 16px; }
+  .notes-live-preview { position: relative; top: auto; max-height: 40dvh; padding: 12px 14px 16px; }
   .notes-live-preview-heading { top: -12px; margin: -12px -14px 10px; padding: 9px 12px; }
 }
 @media (max-width: 1200px) {
